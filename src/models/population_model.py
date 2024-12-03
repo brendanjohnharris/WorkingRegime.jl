@@ -3,7 +3,9 @@ from ..synapses import Synapse, maybe_initializer, DeltaSynapse
 from ..positions import ClusteredPositions, Positions
 import numpy as np
 import jax.numpy as jnp
+import jax
 import types
+from typing import Tuple
 
 import brainpy as bp
 from abc import ABC, abstractmethod
@@ -24,7 +26,9 @@ class FNSPopulations(bp.Network):
     Uses a fixed probability epsilon to connect all populations
     """
 
-    def __init__(self, N, epsilon=0.1, D=1.5, nu_hat=2, g=5, J=0.1):
+    def __init__(
+        self, N, epsilon=0.1, D=1.5, nu_hat=2, g=5, J=0.1, key=jax.random.key(42)
+    ):
         super().__init__()
 
         # * Note that nu_thr = theta / (epsilon * Ne * J * tau)
@@ -50,6 +54,7 @@ class FNSPopulations(bp.Network):
         exc_positions = ClusteredPositions((-1.5, 0), 1)
         inh_positions = ClusteredPositions((1.5, 0), 1)
 
+        Ekey, Ikey = jax.random.split(key)
         # neurons
         self.E = LIFNeuron(
             size=num_exc,
@@ -61,6 +66,7 @@ class FNSPopulations(bp.Network):
             tau=tau,
             tau_ref=tau_ref,
             V_initializer=bp.init.Normal(0, 1.0),
+            key=Ekey,
         )
 
         # Create a population of inhibitory neurons
@@ -74,6 +80,7 @@ class FNSPopulations(bp.Network):
             tau=tau,
             tau_ref=tau_ref,
             V_initializer=bp.init.Normal(0, 1.0),
+            key=Ikey,
         )
 
         # Synapses

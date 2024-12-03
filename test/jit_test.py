@@ -18,18 +18,21 @@ def simple_jit_test():
 
 
 def jit_positions():
-    f = src.positions.ClusteredPositions((-1.5, 0), 1)
-    f = bp.math.jit(f)
-    f((10, 10))
+    positions = src.positions.ClusteredPositions((-1.5, 0), 1)
+    jax.jit(positions.__call__)
+    key = jax.random.key(42)
+    p = positions([10, 10], key)
     return True
 
 
 def jit_LIFNeurons():
     positions = src.positions.ClusteredPositions((-1.5, 0), 1)
-    positions = bp.math.jit(positions)
-    neuron = bp.math.jit(src.neurons.LIFNeuron.__init__)
-    E = neuron(
-        size=100,
+    positions = bp.math.jit(positions.__call__, static_argnums=0)
+    key = jax.random.key(42)
+    init = bp.init.Normal(0, 1.0)
+    En = 100
+    E = src.neurons.LIFNeuron(
+        size=En,
         embedding=positions,
         V_rest=0.0,  # For simple IF neuron in paper
         V_th=20,
@@ -37,25 +40,24 @@ def jit_LIFNeurons():
         R=1,
         tau=20,
         tau_ref=2,
-        V_initializer=bp.init.Normal(0, 1.0),
+        V_initializer=bp.math.Variable(init(En)),
+        key=key,
     )
 
-    def run(E):
-        runner = bp.DSRunner(E, monitors=("E.spike",))
-        runner.run(1000.0)
-        return runner
+    def run(T):
+        runner = bp.DSRunner(E, monitors=("spike",))
+        runner.run(T)
+        return runner.mon.ts
 
     run = bp.math.jit(run)
-    runner = run(E)
-    # print(runner.mon.ts)
+    ts = run(1000.0)
     return True
 
 
 def main():
     simple_jit_test()
     jit_positions()
-    # jit_LIFNeurons()
-    return True
+    jit_LIFNeurons()
 
 
 if __name__ == "__main__":
