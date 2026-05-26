@@ -6,4 +6,4 @@
 	url = https://github.com/brendanjohnharris/WRCircuit.jl
 [submodule "WRTheory.jl"]
 	path = WRTheory.jl
-	url = ./WRTheory.jl/
+	url = https://github.com/brendanjohnharris/WRTheory.jl/.git

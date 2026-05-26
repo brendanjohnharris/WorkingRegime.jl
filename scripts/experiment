@@ -1,8 +1,0 @@
-#! /bin/bash
-
-SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-
-chmod u+x $PROJECT_DIR/WRExperiment.jl/scripts/plots/*
-"$PROJECT_DIR/WRExperiment.jl/scripts/plots/diffusion_exponent.jl" "$PROJECT_DIR/data/diffusion_exponent.jld2"
-"$PROJECT_DIR/WRExperiment.jl/scripts/plots/spectral_exponent.jl" "$PROJECT_DIR/data/spectral_exponent.jld2"
