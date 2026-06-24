@@ -1,6 +1,3 @@
 [submodule "WRExperiment.jl"]
 	path = WRExperiment.jl
 	url = https://github.com/brendanjohnharris/WRExperiment.jl
-[submodule "WRTheory.jl"]
-	path = WRTheory.jl
-	url = https://github.com/brendanjohnharris/WRTheory.jl/.git
