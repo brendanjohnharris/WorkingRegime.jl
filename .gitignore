@@ -25,3 +25,5 @@ data/old/
 old_data/
 old_plots/
 Manifest copy.toml
+.claude
+*.pdf
