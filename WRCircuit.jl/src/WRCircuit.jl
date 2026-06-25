@@ -12,7 +12,7 @@ import Logging
 
 export convert2, terminal_logging!
 
-const DEWDROP_BACKEND = Dewdrop.CPU
+const DEWDROP_BACKEND = Dewdrop.GPU
 
 # Kept for script compatibility: was a PythonCall `pyconvert` wrapper; native results are already Julia
 # values, so this is just a typed converter (`convert2(Float32)(x) == convert(Float32, x)`).

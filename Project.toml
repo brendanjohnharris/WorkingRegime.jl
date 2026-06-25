@@ -8,3 +8,6 @@ TimeseriesTools = "380cddd1-6ef2-46ca-b087-e7151fb095ff"
 
 [sources]
 Fathom = {rev = "main", url = "https://github.com/brendanjohnharris/Fathom.jl"}
+
+[workspace]
+projects = ["WRCircuit.jl"]

@@ -7,7 +7,7 @@ using Unitful
 import Dewdrop
 using Dewdrop: solve, FixedStep, Trace, Spikes
 
-export simulate, bpformat, bpsolve, Neuron, Population, Monitor, Spatial, PRNGKey,
+export simulate, simulate_batch, bpformat, bpsolve, Neuron, Population, Monitor, Spatial, PRNGKey,
     models, defaults
 
 # Reuse Dewdrop's TimeseriesBase-extension output dimensions (registered when TimeseriesBase loads),
@@ -141,6 +141,52 @@ function simulate(
     record = _perpop_record(populations, vars)
     # materialise (build the connectome) + run, injecting the real run window `tspan`
     return solve(spec, FixedStep(dt); tspan = (0.0, tmax_ms), v0 = (-70.0, -50.0), record = record, progress = progress)
+end
+
+# --- Batched sweep over (delta, Delta_g_K) at a fixed connectome ---------------------------------
+"""
+    simulate_batch(model, time, deltas, dgks; dt=0.1, progress=:auto, arch=DEWDROP_BACKEND(), kwargs...) -> Dewdrop.BatchedSolution
+
+Co-execute `B = length(deltas)` members of `model` over ONE shared connectome (fixed seed + `sigma_ee`),
+sweeping `delta` (`deltas[m]`) and `Delta_g_K` (`dgks[m]`) per member through Dewdrop's `(N,B)` batched
+ensemble --- memory `O(edges)` (not `O(B·edges)`), one connectome build, and a kernel that fills the
+launch-bound GPU. `Delta_g_K` is an `N×B` neuron-model override (E rows get `dgks[m]`, I rows stay 0);
+`delta` is a per-member conductance gain on the inhibitory projections (I→E, I→I) --- the per-edge weight is
+linear in `delta`, so scaling the synapse coefficient on a connectome built at `delta = 1` reproduces each
+member's `delta` network. Fix the connectome's `seed` (via `model`) and `sigma_ee` (a keyword) per job; sweep
+`(delta, Delta_g_K)` here. The streaming Poisson drive is SHARED across members (same realization). Member
+`m`'s E `input` (`itot`) trace and `spike` raster are `bs.record.input.data[:, m, :]` /
+`bs.record.spike.data[:, m, :]` (a `(NE, B, nsteps)` array each). Note: each E `input` trace is
+`NE × nsteps × sizeof(T)`, so bound `B` (the chunk size) by memory.
+"""
+function simulate_batch(
+        model::SpatialModel, time, deltas::AbstractVector{<:Real}, dgks::AbstractVector{<:Real};
+        dt = 0.1, progress = :auto, arch::Dewdrop.AbstractArchitecture = DEWDROP_BACKEND(), kwargs...
+    )
+    B = length(deltas)
+    length(dgks) == B || throw(ArgumentError("deltas and dgks must be equal length (got $B and $(length(dgks)))"))
+    tmax_ms = ustrip(to_ms(time))
+    delta0 = 1.0    # connectome built at unit delta; per-member delta is a synapse `a` gain (linear in weight)
+    bparams = merge((; model.params...), (; kwargs...), (; delta = delta0))   # force the unit-delta connectome
+    spec = build_spatial(; bparams..., seed = model.seed, arch = arch)
+    net = Dewdrop.materialize(spec, FixedStep(dt); tspan = (0.0, tmax_ms))
+    N = net.n
+    Erange = net.subpops[:E]
+    T = Dewdrop.float_type(net.model)
+    # Δg_K: per-(neuron, member) override --- E rows get the member's value, I rows stay 0 (the E/I split).
+    ΔgK = T[(i in Erange) ? dgks[m] : 0.0 for i in 1:N, m in 1:B]
+    # delta: per-member conductance gain on the inhibitory projections (I→E = 3, I→I = 4 in build order).
+    inh = net.projections[3].synapse
+    inh isa Dewdrop.FrozenDualExpSynapse ||
+        error("simulate_batch: expected the inhibitory FrozenDualExpSynapse at projection 3 (got $(typeof(inh)))")
+    a_vec = T[Dewdrop._dualexp_a(inh.τr, inh.τd) * deltas[m] / delta0 for m in 1:B]
+    syn_over = Dict(3 => (; a = a_vec), 4 => (; a = a_vec))
+    return solve(
+        net, FixedStep(dt); batch = B, v0 = (-70.0, -50.0),
+        model_overrides = (; ΔgK = ΔgK), syn_overrides = syn_over,
+        record = (input = Trace(:itot; of = collect(Erange)), spike = Spikes(of = collect(Erange))),
+        progress = progress,
+    )
 end
 
 # --- Format (BrainPy-identical output) ----------------------------------------------------------

@@ -3,160 +3,103 @@
 #=
 exec julia +1.12 --handle-signals=yes -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
+# Critical sweep --- the working-regime phase diagram over (delta, Delta_g_K, sigma_ee), now run on the native
+# Dewdrop (N,B) BATCHED ensemble (no JAX/BrainPy). Factoring: the connectome-changing axes (random `seed` and
+# `sigma_ee`) become OUTER jobs --- one connectome each --- while the weight/param axes (`delta`, `Delta_g_K`)
+# become the BATCH columns, co-executed over that shared connectome by `simulate_batch`. The 5 random seeds are
+# the 'Obs' dimension stamped onto every saved result (plumbed into downstream scripts later). Set the env var
+# `WRCIRCUIT_SMOKE` for a tiny end-to-end run.
 using DrWatson
-DrWatson.@quickactivate
+DrWatson.@quickactivate :WRCircuit
 using WRCircuit
 using JLD2
-using LinearAlgebra
-using Random
-using SparseArrays
 using MoreMaps
+using Statistics
 WRCircuit.@preamble
-set_theme!(foresight(:physics))
 
-begin # * Sampling parameters
-    batch_size = 1
-    path = datadir("critical_sweep")
+const SMOKE = haskey(ENV, "WRCIRCUIT_SMOKE")   # tiny config for a quick end-to-end validation
+
+begin # * Sweep configuration
+    # B = batch chunk size (members co-executed per `solve`). Each member's recorded E-input trace is
+    # NE × nsteps × sizeof(T); LOWER B for large `rho` / long `tmax` to bound host memory (≈ B·NE·nsteps·4 B).
+    B = SMOKE ? 2 : 8
+    seeds = SMOKE ? (1:1) : (1:5)              # connectome realizations → the 'Obs' (integer seed) dimension
+    model_kwargs = SMOKE ? (; rho = 400, dx = 0.6, nu = 30.0, n_ext = 60) : (;)   # shrink the net under SMOKE
+    arch = WRCircuit.DEWDROP_BACKEND()         # CPU by default; `Dewdrop.GPU()` fills the GPU with the batch
+    path = SMOKE ? joinpath(tempdir(), "wrcircuit_sweep_smoke") : datadir("critical_sweep")
 end
 
-begin # * Fixed parameters
-    model = WRCircuit.models.Spatial
-    default_params = WRCircuit.defaults(model)
-
-    tmax = 35u"s"
-    transient = 5u"s" # The transient. Simulations always begin at 0
-    dx = default_params[:parameters][:dx]
-    rho = default_params[:parameters][:rho]
-
-    monitors = ["E.spike", "E.input"] |> pytuple
-    stat_funcs = Dict("monitor" => WRCircuit.stats.monitor)
-
-    dt = pyconvert(Float32, WRCircuit.brainpy.share["dt"]) * u"ms"
-    metadata = (; tmax, transient, monitors, dt)
+begin # * Fixed run parameters
+    defaults = WRCircuit.defaults(WRCircuit.models.Spatial)
+    tmax = SMOKE ? 200u"ms" : 35u"s"
+    transient = SMOKE ? 50u"ms" : 5u"s"        # discarded transient; simulations always begin at 0
+    dt = 0.1u"ms"
+    dt_ms = ustrip(u"ms", dt)
+    transient_ms = ustrip(u"ms", transient)
 end
 
-begin # * Format parameters: three 2D planes through the default point
-    # * 1D ranges for each parameter
-    delta = range(3.5, 5, length = 31)
-    Delta_g_K = range(0, 0.005, length = 26)
-    # * Spatial range of the E2E connectivity kernel (mm); default sigma_ee = 0.06
-    sigma_ee = range(0.03, 0.12, length = 19)
-
-    delta = round.(delta; sigdigits = 3)
-    Delta_g_K = round.(Delta_g_K; sigdigits = 3)
-    sigma_ee = round.(sigma_ee; sigdigits = 3)
-
-    delta_0 = round(Float64(default_params[:parameters][:delta]); sigdigits = 3)
-    Delta_g_K_0 = round(Float64(default_params[:parameters][:Delta_g_K]); sigdigits = 3)
-    sigma_ee_0 = round(Float64(default_params[:parameters][:sigma_ee]); sigdigits = 3)
-
-    # * Each plane spans two parameters; the third is held at its default
-    plane_dg = [
-        (; delta = d, Delta_g_K = gk, sigma_ee = sigma_ee_0)
-            for d in delta, gk in Delta_g_K
-    ]            # delta × Delta_g_K
-    plane_ds = [
-        (; delta = d, Delta_g_K = Delta_g_K_0, sigma_ee = s)
-            for d in delta, s in sigma_ee
-    ]              # delta × sigma_ee
-    plane_gs = [
-        (; delta = delta_0, Delta_g_K = gk, sigma_ee = s)
-            for gk in Delta_g_K, s in sigma_ee
-    ]         # Delta_g_K × sigma_ee
-
-    # * Concatenate and drop the shared cross-lines / centre point
+begin # * Parameter planes: three 2-D planes through the default working-regime point
+    n = SMOKE ? (3, 3, 2) : (31, 26, 19)
+    delta = round.(range(3.5, 5, length = n[1]); sigdigits = 3)
+    Delta_g_K = round.(range(0, 0.005, length = n[2]); sigdigits = 3)
+    sigma_ee = round.(range(0.03, 0.12, length = n[3]); sigdigits = 3)
+    delta_0 = round(Float64(defaults[:delta]); sigdigits = 3)
+    Delta_g_K_0 = round(Float64(defaults[:Delta_g_K]); sigdigits = 3)
+    sigma_ee_0 = round(Float64(defaults[:sigma_ee]); sigdigits = 3)
+    plane_dg = [(; delta = d, Delta_g_K = gk, sigma_ee = sigma_ee_0) for d in delta, gk in Delta_g_K]
+    plane_ds = [(; delta = d, Delta_g_K = Delta_g_K_0, sigma_ee = s) for d in delta, s in sigma_ee]
+    plane_gs = [(; delta = delta_0, Delta_g_K = gk, sigma_ee = s) for gk in Delta_g_K, s in sigma_ee]
     parameter_vector = unique(vcat(vec(plane_dg), vec(plane_ds), vec(plane_gs)))
-
-    if !isdir(path)
-        mkpath(path)
-    end
+    isdir(path) || mkpath(path)
 end
 
-begin
-    parameter_vector = filter(parameter_vector) do p
-        filename = savename(p; connector = string(connector))
-        exists = isfile(joinpath(path, filename) * ".jld2")
-        return !exists
-    end
-    sort!(parameter_vector; by = Base.Fix2(getindex, :Delta_g_K)) # Group by Delta_G_K
-    batches = Iterators.partition(parameter_vector[:], batch_size)
-end
-if isempty(parameter_vector)
-    @info "All parameter combinations already simulated. Exiting."
-    exit()
-end
-begin # * Run simulation
-    for (j, _params) in enumerate(batches)
-        @info "Batch $j / $(length(batches))"
+# τ lags for the input MAD (log-spaced, in time units); shared across members.
+const τs = (unique(round.(Int, logrange(10, 10000, length = 100))) .* dt)
 
-        @debug "Creating keys..."
-        keys = rand(UInt32, length(_params))
-        jax_keys = WRCircuit.jax.numpy.stack([WRCircuit.PRNGKey(k) for k in keys])
-        # # ? Important, must be python array
-
-        @debug "Creating params..."
-        # * Vector of tuples to tuple of vectors
-        keys = propertynames(first(_params))
-        params = (; (k => getfield.(_params, k) for k in keys)..., key = jax_keys)
-
-        @debug "Creating runner..."
-        runner = WRCircuit.create_run(model; monitors, tmax, transient)
-
-        @debug "Creating stats_run..."
-        stats_run = WRCircuit.create_stats_run(runner, stat_funcs)
-
-        @debug "Running partial_vmap..."
-        stats, sweep_parameters = WRCircuit.partial_vmap(stats_run)(params)
-
-        @debug "Formatting results..."
-        res = WRCircuit.batchformat(pyconvert(Dict, stats), sweep_parameters; metadata)
-
-        @debug "Processing individual params..."
-        for i in eachindex(_params)
-            @debug "  Processing $i / $(length(_params))"
-            filename = savename(_params[i], "jld2"; connector)
-
-            merged_params = (; default_params[:parameters]..., _params[i]...)
-            ks = Base.keys(res.monitor)
-            idx = Dict.(pairs.(ks)) .== [Dict(pairs(_params[i]))]
-            r = res.monitor[only(collect(ks)[idx])]
-
-            begin # * Input statistics
-                x = r.var"E.input"
-                x = x .- mean(x, dims = 𝑡) # Remove DC offset
-                # * MAD of inputs
-                τs = logrange(10, 10000, length = 100)
-                τs = unique(round.(Int, τs)) .* dt
-                mad = map(Chart(Threaded(), LogLogger()), eachslice(x, dims = Neuron)) do _x
-                    madev(_x, τs)
-                end |> stack
-
-                # * PSD of inputs
-                psd = map(Chart(Threaded(), LogLogger()), eachslice(x, dims = Neuron)) do _x
-                    _x = _x .- mean(_x)
-                    spectrum(_x, 0.25)
-                end |> stack
-
-                # * Downsample for distribution estimate
-                # distribution = x[1:10:end, :]
-            end
-
-            out = Dict(
-                "parameters" => merged_params,
-                "spikes" => r.var"E.spike",
-                "inputs/mad" => mad,
-                "inputs/psd" => psd
-                #    "inputs/distribution" => distribution
-            )
-            wsave(joinpath(path, filename), out)
+begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B) batch over (delta, Delta_g_K)
+    for seed in seeds
+        model = WRCircuit.Spatial(; key = seed)
+        # this seed's not-yet-saved combos (resume), grouped by sigma_ee (the connectome axis → one build each)
+        remaining = filter(parameter_vector) do p
+            !isfile(joinpath(path, savename((; p..., seed = seed), "jld2"; connector)))
         end
-
-        @debug "Batch $j complete"
-        stats = sweep_parameters = res = runner = stats_run = nothing
-        GC.gc()
-        PythonCall.GC.gc()
-        WRCircuit.jax.clear_caches()
-        flush(stderr)
-        flush(stdout)
+        isempty(remaining) && continue
+        for σ in unique(p.sigma_ee for p in remaining)
+            combos = filter(p -> p.sigma_ee == σ, remaining)
+            for chunk in Iterators.partition(combos, B)
+                deltas = [Float64(c.delta) for c in chunk]
+                dgks = [Float64(c.Delta_g_K) for c in chunk]
+                @info "seed $seed / sigma_ee $σ: batch of $(length(chunk))"
+                bs = simulate_batch(
+                    model, tmax, deltas, dgks;
+                    sigma_ee = σ, dt = dt_ms, arch = arch, progress = true, model_kwargs...
+                )
+                steps = size(bs.record.input.data, 3)
+                times_ms = (0:(steps - 1)) .* dt_ms
+                for (i, c) in enumerate(chunk)
+                    # member i's E input as a (𝑡 × Neuron) Timeseries with the transient dropped (same shim as
+                    # the single-run path); then the per-neuron input MAD + PSD, identical to the old analysis.
+                    x = WRCircuit._label_cell(permutedims(bs.record.input.data[:, i, :]), :E, times_ms, transient_ms)
+                    x = x .- mean(x, dims = 𝑡)   # remove the per-neuron DC offset
+                    mad = map(Chart(Threaded(), LogLogger()), eachslice(x, dims = Neuron)) do _x
+                        madev(_x, τs)
+                    end |> stack
+                    psd = map(Chart(Threaded(), LogLogger()), eachslice(x, dims = Neuron)) do _x
+                        spectrum(_x .- mean(_x), 0.25)
+                    end |> stack
+                    spikes = WRCircuit._label_cell(permutedims(bs.record.spike.data[:, i, :]), :E, times_ms, transient_ms)
+                    parameters = (; defaults..., c..., seed = seed)   # `seed` is the Obs dimension
+                    out = Dict(
+                        "parameters" => parameters, "spikes" => spikes,
+                        "inputs/mad" => mad, "inputs/psd" => psd,
+                    )
+                    wsave(joinpath(path, savename((; c..., seed = seed), "jld2"; connector)), out)
+                end
+                bs = nothing
+                GC.gc()
+            end
+        end
     end
+    nfiles = count(endswith(".jld2"), readdir(path))
+    @info "Sweep done: $nfiles result files in $path"
 end
