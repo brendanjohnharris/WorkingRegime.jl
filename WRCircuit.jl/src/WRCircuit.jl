@@ -43,7 +43,6 @@ const stats = (;
     efficiency = Dewdrop.efficiency,
 )
 
-# --- REPL progress logging ----------------------------------------------------------------------
 """
     terminal_logging!()
 

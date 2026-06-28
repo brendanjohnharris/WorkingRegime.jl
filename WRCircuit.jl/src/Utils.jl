@@ -5,16 +5,16 @@ using Random
 import Accessors: @set
 
 export firingrate, cv, plotdir, connector, bootstrapaverage, bootstrapmedian,
-       structurefunction, histcounts, timebins, unitarylfp, to_ms, to_mm
+    structurefunction, histcounts, timebins, unitarylfp, to_ms, to_mm
 
 function _preamble()
-    quote
+    return quote
         using DrWatson
         using Unitful
         using Statistics
         using Bootstrap
         using TimeseriesTools
-        using CairoMakie
+        using Makie
         using TimeseriesMakie
         using Foresight
         using LinearAlgebra
@@ -30,7 +30,7 @@ function _preamble()
     end
 end
 macro preamble()
-    _preamble()
+    return _preamble()
 end
 @preamble
 
@@ -43,10 +43,10 @@ const UnivariateSpikeTrain = Base.typeintersect(SpikeTrain, UnivariateTimeseries
 const MultivariateSpikeTrain = Base.typeintersect(SpikeTrain, MultivariateTimeseries)
 function firingrate(x::UnivariateSpikeTrain)
     λ = sum(x) / duration(x)
-    uconvert(unit(eltype(x)) * u"Hz", λ)
+    return uconvert(unit(eltype(x)) * u"Hz", λ)
 end
 function firingrate(X::MultivariateSpikeTrain)
-    firingrate.(eachslice(X, dims = dims(X)[2:end]))
+    return firingrate.(eachslice(X, dims = dims(X)[2:end]))
 end
 function cv(x::UnivariateSpikeTrain)
     ts = times(x[x])
@@ -58,7 +58,7 @@ function cv(x::UnivariateSpikeTrain)
     end
 end
 function cv(X::MultivariateSpikeTrain)
-    cv.(eachslice(X, dims = dims(X)[2:end]))
+    return cv.(eachslice(X, dims = dims(X)[2:end]))
 end
 
 """
@@ -68,19 +68,19 @@ Generates a vector of differences at different lags, that can be used ot compute
 lag-dependent statistics of the difference distribution
 """
 function structurefunction(x::AbstractMatrix, τ::Int)
-    Δ = @views x[(τ + 1):end, :] - x[1:(end - τ), :]
+    return Δ = @views x[(τ + 1):end, :] - x[1:(end - τ), :]
 end
 function structurefunction(x::AbstractVector, τ::Int)
-    Δ = @views x[(τ + 1):end] - x[1:(end - τ)]
+    return Δ = @views x[(τ + 1):end] - x[1:(end - τ)]
 end
 function structurefunction(x::RegularTimeseries, τ::Int; kwargs...)
-    structurefunction(parent(x), τ; kwargs...)
+    return structurefunction(parent(x), τ; kwargs...)
 end
 function structurefunction(x::RegularTimeseries, τ::AbstractFloat)
-    structurefunction(x, Int(τ ÷ step(x)); kwargs...)
+    return structurefunction(x, Int(τ ÷ step(x)); kwargs...)
 end
 function structurefunction(x::AbstractArray, τs)
-    progressmap(τs) do τ
+    return progressmap(τs) do τ
         structurefunction(x, τ)
     end
 end
@@ -101,13 +101,13 @@ function timebins(x::RegularTimeseries, τ::Number)
     end
     tbins = range(first(times(x)), last(times(x)), step = τ)
     tbins = [i .. i + τ for i in tbins]
-    x = DimensionalData.groupby(x, 𝑡 => Bins(tbins))
+    return x = DimensionalData.groupby(x, 𝑡 => Bins(tbins))
 end
 function TimeseriesTools.coarsegrain(x::RegularTimeseries, τ::Number)
     negdims = setdiff(1:ndims(x), dimnum(x, 𝑡))
     x = timebins(x, τ)
     x = eachslice.(x; dims = negdims |> Tuple) |> stack
-    x = permutedims(x, circshift(1:ndims(x), -1))
+    return x = permutedims(x, circshift(1:ndims(x), -1))
 end
 TimeseriesTools.coarsegrain(x::UnivariateRegular, τ::Number) = timebins(x, τ)
 
@@ -150,7 +150,7 @@ function check_inputs(times, spikes, spike_type)
     if ndims(spikes) != 2
         error("spikes must be 2D.")
     end
-    if length(times) != size(spikes, 1)
+    return if length(times) != size(spikes, 1)
         error("Mismatch between length of times and first dimension of spikes.")
     end
 end
@@ -174,10 +174,12 @@ function get_amplitudes(location)
     end
 end
 
-function unitarylfp(times, spikes, spike_type;
-                    xmax = 0.2, ymax = 0.2, va = 200.0, lambda_ = 0.2,
-                    sig_i = 2.1, sig_e = 2.1 * 1.5, location = :soma,
-                    seed = nothing)
+function unitarylfp(
+        times, spikes, spike_type;
+        xmax = 0.2, ymax = 0.2, va = 200.0, lambda_ = 0.2,
+        sig_i = 2.1, sig_e = 2.1 * 1.5, location = :soma,
+        seed = nothing
+    )
     check_inputs(times, spikes, spike_type)
     times = map(ustrip ∘ to_ms, times)
     times = map(Float32, times)
@@ -204,7 +206,7 @@ function unitarylfp(times, spikes, spike_type;
 end
 
 function group_dt(x::T, dt) where {T}
-    round(x / dt) * dt
+    return round(x / dt) * dt
 end
 function compute_rates(spikes::SpikeTrain, dt)
     rates = groupby(spikes, 𝑡 => Base.Fix2(group_dt, dt))
@@ -212,12 +214,12 @@ function compute_rates(spikes::SpikeTrain, dt)
         dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", dt)
     end |> stack
     rates = permutedims(rates, (𝑡, Neuron))
-    rates = rectify(rates, dims = 𝑡)
+    return rates = rectify(rates, dims = 𝑡)
 end
 
 function log10spectrum(x::AbstractSpectrum)
     fs = map(log10, lookup(x, 𝑓))
-    set(map(log10, x), 𝑓 => Log10𝑓(fs))
+    return set(map(log10, x), 𝑓 => Log10𝑓(fs))
 end
 
 function convert2(u::Unitful.Units, x::AbstractRange)

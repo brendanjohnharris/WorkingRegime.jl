@@ -1,4 +1,4 @@
-using CairoMakie
+using Makie
 import ProgressLogging: @withprogress, @logprogress
 import Statistics: quantile
 

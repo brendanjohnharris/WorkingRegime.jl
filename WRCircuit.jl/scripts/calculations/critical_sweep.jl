@@ -20,9 +20,10 @@ WRCircuit.@preamble
 const SMOKE = haskey(ENV, "WRCIRCUIT_SMOKE")   # tiny config for a quick end-to-end validation
 
 begin # * Sweep configuration
-    # B = batch chunk size (members co-executed per `solve`). Each member's recorded E-input trace is
-    # NE × nsteps × sizeof(T); LOWER B for large `rho` / long `tmax` to bound host memory (≈ B·NE·nsteps·4 B).
-    B = SMOKE ? 2 : 8
+    # B = batch chunk size (members co-executed per `solve`). All saved statistics (MAD, PSD, rate, Fano) are
+    # reduced ON-DEVICE by streaming monitors --- no trace or raster is stored --- so host memory no longer
+    # scales with `nsteps`; B is now bounded only by the connectome + per-member reducer state (small).
+    B = SMOKE ? 2 : 32
     seeds = SMOKE ? (1:1) : (1:5)              # connectome realizations → the 'Obs' (integer seed) dimension
     model_kwargs = SMOKE ? (; rho = 400, dx = 0.6, nu = 30.0, n_ext = 60) : (;)   # shrink the net under SMOKE
     arch = WRCircuit.DEWDROP_BACKEND()         # CPU by default; `Dewdrop.GPU()` fills the GPU with the batch
@@ -53,8 +54,14 @@ begin # * Parameter planes: three 2-D planes through the default working-regime 
     isdir(path) || mkpath(path)
 end
 
-# τ lags for the input MAD (log-spaced, in time units); shared across members.
-const τs = (unique(round.(Int, logrange(10, 10000, length = 100))) .* dt)
+# τ lags for the input MAD. The streaming MADev monitor works in integer RECORDED-SAMPLE (step) units, so we
+# pass step `mad_lags`; `τs = mad_lags .* dt` is the matching physical-time axis used to label the saved result.
+const mad_lags = unique(round.(Int, logrange(10, 10000, length = 100)))
+const τs = mad_lags .* dt
+const psd_fmin = 0.25                       # min resolved frequency for the streaming Welch PSD (≡ old spectrum(_, 0.25))
+# Fano-factor window sizes (ms), matching plot_critical_demo.jl's `logrange(dt*10, dt*1000, length=200)`.
+const fano_taus = collect(logrange(dt_ms * 10, dt_ms * 1000, length = 200))
+const transient_steps = round(Int, transient_ms / dt_ms)   # transient dropped on-device by the reductions
 
 begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B) batch over (delta, Delta_g_K)
     for seed in seeds
@@ -70,27 +77,31 @@ begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B
                 deltas = [Float64(c.delta) for c in chunk]
                 dgks = [Float64(c.Delta_g_K) for c in chunk]
                 @info "seed $seed / sigma_ee $σ: batch of $(length(chunk))"
+                # All four statistics --- input MAD + PSD (from `itot`), and spike RATE + FANO --- are reduced
+                # ON-DEVICE by streaming monitors. No trace or raster is ever materialised (host or device), so
+                # host memory no longer scales with `nsteps`. `scatter = :compacted` is the advisor's pick for
+                # this sparse-firing large network (processes only active synapses; ~30× faster scatter).
                 bs = simulate_batch(
                     model, tmax, deltas, dgks;
-                    sigma_ee = σ, dt = dt_ms, arch = arch, progress = true, model_kwargs...
+                    sigma_ee = σ, dt = dt_ms, arch = arch, progress = true, scatter = :compacted,
+                    mad_lags = mad_lags, psd_fmin = psd_fmin, fano_taus = fano_taus, rate = true,
+                    transient = transient_steps, model_kwargs...
                 )
-                steps = size(bs.record.input.data, 3)
-                times_ms = (0:(steps - 1)) .* dt_ms
+                NE = size(bs.record.rate.data, 1)
+                neuron_labels = Neuron(Symbol.("E" .* string.(1:NE)))
+                lag_axis = 𝑡(τs)                                                       # MAD lag axis (physical time)
+                nfreq = size(bs.record.psd.data, 3)
+                freq_axis = 𝑓(range(0, inv(2 * dt_ms), length = nfreq) .* u"ms^-1")    # Welch one-sided frequencies
+                fano_axis = 𝑡(fano_taus .* u"ms")                                      # Fano timescale axis
                 for (i, c) in enumerate(chunk)
-                    # member i's E input as a (𝑡 × Neuron) Timeseries with the transient dropped (same shim as
-                    # the single-run path); then the per-neuron input MAD + PSD, identical to the old analysis.
-                    x = WRCircuit._label_cell(permutedims(bs.record.input.data[:, i, :]), :E, times_ms, transient_ms)
-                    x = x .- mean(x, dims = 𝑡)   # remove the per-neuron DC offset
-                    mad = map(Chart(Threaded(), LogLogger()), eachslice(x, dims = Neuron)) do _x
-                        madev(_x, τs)
-                    end |> stack
-                    psd = map(Chart(Threaded(), LogLogger()), eachslice(x, dims = Neuron)) do _x
-                        spectrum(_x .- mean(_x), 0.25)
-                    end |> stack
-                    spikes = WRCircuit._label_cell(permutedims(bs.record.spike.data[:, i, :]), :E, times_ms, transient_ms)
+                    # Rebuild the labelled (stat × Neuron) arrays from member i's on-device-reduced slice.
+                    mad = ToolsArray(permutedims(bs.record.mad.data[:, i, :]), (lag_axis, neuron_labels))
+                    psd = ToolsArray(permutedims(bs.record.psd.data[:, i, :]), (freq_axis, neuron_labels))
+                    fano = ToolsArray(permutedims(bs.record.fano.data[:, i, :]), (fano_axis, neuron_labels))
+                    rate = ToolsArray(uconvert.(u"Hz", bs.record.rate.data[:, i] .* u"ms^-1"), neuron_labels)
                     parameters = (; defaults..., c..., seed = seed)   # `seed` is the Obs dimension
                     out = Dict(
-                        "parameters" => parameters, "spikes" => spikes,
+                        "parameters" => parameters, "rate" => rate, "fano" => fano,
                         "inputs/mad" => mad, "inputs/psd" => psd,
                     )
                     wsave(joinpath(path, savename((; c..., seed = seed), "jld2"; connector)), out)

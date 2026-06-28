@@ -5,7 +5,7 @@ using DimensionalData
 using IntervalSets
 using Unitful
 import Dewdrop
-using Dewdrop: solve, FixedStep, Trace, Spikes
+using Dewdrop: solve, FixedStep, Trace, Spikes, MADev, Welch, SpikeRate, Fano
 
 export simulate, simulate_batch, bpformat, bpsolve, Neuron, Population, Monitor, Spatial, PRNGKey,
     models, defaults
@@ -158,10 +158,23 @@ member's `delta` network. Fix the connectome's `seed` (via `model`) and `sigma_e
 `m`'s E `input` (`itot`) trace and `spike` raster are `bs.record.input.data[:, m, :]` /
 `bs.record.spike.data[:, m, :]` (a `(NE, B, nsteps)` array each). Note: each E `input` trace is
 `NE × nsteps × sizeof(T)`, so bound `B` (the chunk size) by memory.
+
+Pass any of the following to record streaming ON-DEVICE statistics instead of the raw trace/raster --- only
+the small reduced result is kept (`O(NE·nstat)`), so the long signals are never materialised (host or device),
+and host memory stops scaling with `nsteps`:
+- `mad_lags` (integer step lags) → `bs.record.mad.data` `(NE, B, nlags)`, the [`Dewdrop.MADev`](@ref) input MAD;
+- `psd_fmin` (min frequency) → `bs.record.psd.data` `(NE, B, nfreq)`, the [`Dewdrop.Welch`](@ref) input power spectrum;
+- `fano_taus` (timescales) → `bs.record.fano.data` `(NE, B, ntau)`, the [`Dewdrop.Fano`](@ref) spike Fano-factor curve;
+- `rate = true` → `bs.record.rate.data` `(NE, B)`, the [`Dewdrop.SpikeRate`](@ref) per-neuron mean firing rate.
+`transient` (recorded steps) is dropped by the reductions. The full spike raster is kept only with
+`record_spikes = true` (default: only in the no-reduction fallback). `scatter` is forwarded to `solve`
+(`:auto`, or `:compacted` for sparse firing over a large connectome).
 """
 function simulate_batch(
         model::SpatialModel, time, deltas::AbstractVector{<:Real}, dgks::AbstractVector{<:Real};
-        dt = 0.1, progress = :auto, arch::Dewdrop.AbstractArchitecture = DEWDROP_BACKEND(), kwargs...
+        dt = 0.1, progress = :auto, arch::Dewdrop.AbstractArchitecture = DEWDROP_BACKEND(),
+        mad_lags = nothing, psd_fmin = nothing, fano_taus = nothing, rate = false,
+        transient = 0, scatter = :auto, record_spikes = nothing, kwargs...
     )
     B = length(deltas)
     length(dgks) == B || throw(ArgumentError("deltas and dgks must be equal length (got $B and $(length(dgks)))"))
@@ -181,11 +194,29 @@ function simulate_batch(
         error("simulate_batch: expected the inhibitory FrozenDualExpSynapse at projection 3 (got $(typeof(inh)))")
     a_vec = T[Dewdrop._dualexp_a(inh.τr, inh.τd) * deltas[m] / delta0 for m in 1:B]
     syn_over = Dict(3 => (; a = a_vec), 4 => (; a = a_vec))
+    of = collect(Erange)
+    tr = Int(transient)
+    # Recording. Each statistic is OPT-IN via its parameter and streamed ON-DEVICE (the long trace/raster is
+    # never materialised --- host or device --- only the small reduced result is kept; `transient` recorded
+    # steps are dropped):
+    #   `mad_lags` → MADev (E `itot` mean-absolute-displacement at integer step lags)
+    #   `psd_fmin` → Welch  (E `itot` power spectrum, min resolved frequency `psd_fmin`)
+    #   `fano_taus` → Fano  (E spike-count Fano-factor curve at timescales `fano_taus`)
+    #   `rate = true` → SpikeRate (E mean firing rate per neuron)
+    # If none are requested, fall back to the raw E `itot` trace. The full spike raster is recorded only when
+    # `record_spikes = true` (default `nothing` → only in the raw fallback, since the reductions replace it).
+    # `scatter` is forwarded to `solve` (`:auto` picks edge/compacted; pass `:compacted` for sparse firing).
+    reduced = !(mad_lags === nothing && psd_fmin === nothing && fano_taus === nothing) || rate
+    rec = reduced ? (;) : (; input = Trace(:itot; of = of))
+    mad_lags === nothing || (rec = merge(rec, (; mad = MADev(:itot; of = of, lags = mad_lags, transient = tr))))
+    psd_fmin === nothing || (rec = merge(rec, (; psd = Welch(:itot; of = of, f_min = psd_fmin, transient = tr))))
+    fano_taus === nothing || (rec = merge(rec, (; fano = Fano(; of = of, taus = fano_taus, transient = tr))))
+    rate && (rec = merge(rec, (; rate = SpikeRate(; of = of, transient = tr))))
+    (record_spikes === nothing ? !reduced : record_spikes) && (rec = merge(rec, (; spike = Spikes(of = of))))
     return solve(
         net, FixedStep(dt); batch = B, v0 = (-70.0, -50.0),
         model_overrides = (; ΔgK = ΔgK), syn_overrides = syn_over,
-        record = (input = Trace(:itot; of = collect(Erange)), spike = Spikes(of = collect(Erange))),
-        progress = progress,
+        record = rec, scatter = scatter, progress = progress,
     )
 end
 

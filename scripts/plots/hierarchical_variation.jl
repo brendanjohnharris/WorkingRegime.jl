@@ -5,21 +5,22 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 # Hierarchical variation figure.
 #
-# Layout:
-#   Top row    — the (a, b) plane at L2/3 (left) and L6 (right). Each carries the
-#                neuropixels scatter coloured by anatomical hierarchy score, plus
-#                four mean-direction arrows anchored at the scatter centroid that
-#                show the local Jacobian directions of two forward maps at their
-#                canonical operating points:
-#                  · circuit (δ, Δg_K) → (a, b)  [green/purple], from critical_sweep.jld2;
-#                  · bFNS theory (α, β) → (a, b)  [red/blue], from the flat bFNS sweep.
-#   Bottom row — heatmaps for the circuit forward map (δ, Δg_K) → a and → b,
-#                collapsed to a per-cell median from the per-neuron exponents.
+# Layout (4 rows × 2 cols):
+#   Row 1    — the (a, b) plane at L2/3 (left) and L6 (right). Each carries the
+#              neuropixels scatter coloured by anatomical hierarchy score, plus
+#              five mean-direction arrows anchored at the scatter centroid that
+#              show the local Jacobian directions of two forward maps at their
+#              canonical operating points:
+#                · circuit (δ, Δg_K, σ_ee) → (a, b) [green/purple/orange], from critical_sweep.jld2;
+#                · bFNS theory (α, β) → (a, b)       [red/blue], from the flat bFNS sweep.
+#   Rows 2-4 — heatmaps for the three circuit forward-map planes, a (left) and b
+#              (right): (δ, Δg_K), (δ, σ_ee) and (Δg_K, σ_ee). Each cell is a
+#              per-neuron-exponent median pooled across the connectome seeds.
 #
 # Sources: WRExperiment.jl/data/plots/WRExperiment.jld2 (scatter; produced by
 # WRExperiment.jl/scripts/collect_calculations.jl),
-# WRCircuit.jl/data/plots/critical_sweep.jld2 (circuit grid + δ/Δg_K arrows), and
-# WRTheory.jl/data/bFNS_sweep/flat_γ=0.03_η=0.01.jld2 (α/β arrows).
+# WRCircuit.jl/data/plots/critical_sweep.jld2 (the three circuit planes + δ/Δg_K/σ_ee
+# arrows), and WRTheory.jl/data/bFNS_sweep/flat_γ=0.03_η=0.01.jld2 (α/β arrows).
 
 using DrWatson
 @quickactivate "WorkingRegime"
@@ -148,39 +149,62 @@ plot_data = jldopen(
     typemap = _toolsarray_typemap
 )
 
-# Circuit (δ, Δg_K) per-neuron exponent grid — collapse cells to median for heatmap
+# Circuit per-neuron exponent grids — three planes through the working-regime
+# point, each saved as (axis₁, axis₂, seed) of per-neuron exponent vectors. We
+# pool seed + neuron to a per-cell median for the heatmaps and the arrows.
 const circuit_path = projectdir("WRCircuit.jl", "data", "plots", "critical_sweep.jld2")
 circuit = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), circuit_path;
     typemap = _toolsarray_typemap
 )
-"NaN-aware median over a per-cell exponent collection. Empty cells stay NaN.
-Cells may arrive either as plain `Vector{Float64}` (the empty-cell sentinel
-written as `Float64[]`) or as a `NamedArray` (the typemap-upgraded form of the
-1D per-neuron `ToolsArray`); `collect` normalises both to a plain Vector."
-function cell_median(v)
-    vv = filter(!isnan, collect(v))
-    return isempty(vv) ? NaN : median(vv)
+const sigma_ee_0 = circuit["sigma_ee_0"]   # σ_ee at the dg-plane / operating point
+
+"NaN-aware median of one cell's per-neuron exponents POOLED across all seeds (the
+trailing grid axis). Each (axis₁, axis₂, seed) cell may be a plain `Vector{Float64}`
+(the empty-cell sentinel `Float64[]`) or a `NamedArray` (the typemap-upgraded
+per-neuron `ToolsArray`); `collect` normalises both. Empty cells stay NaN."
+function seed_pooled_median(cells)
+    n1, n2 = size(cells, 1), size(cells, 2)
+    out = Matrix{Float64}(undef, n1, n2)
+    for i in 1:n1, j in 1:n2
+        vals = Float64[]
+        for k in axes(cells, 3)
+            append!(vals, filter(!isnan, collect(cells[i, j, k])))
+        end
+        out[i, j] = isempty(vals) ? NaN : median(vals)
+    end
+    return out
 end
 # Wrap the immediate-use map calls in `invokelatest` to satisfy Julia 1.12's
 # stricter world-age rules for global bindings defined at top-level.
 const _δ_lookup_full = circuit["delta"]
 const _gk_lookup_full = circuit["Delta_g_K"]
-const _A_grid_full = Base.invokelatest(map, cell_median, circuit["a"].data)
-const _B_grid_full = Base.invokelatest(map, cell_median, circuit["b"].data)
+const σ_lookup = circuit["sigma_ee"]   # σ_ee shown over its full swept range
+# Full-resolution per-cell median grids, one per plane (rows × cols):
+#   dg: (δ × Δg_K), ds: (δ × σ_ee), gs: (Δg_K × σ_ee).
+const _A_dg_full = Base.invokelatest(seed_pooled_median, circuit["a_dg"].data)
+const _B_dg_full = Base.invokelatest(seed_pooled_median, circuit["b_dg"].data)
+const _A_ds_full = Base.invokelatest(seed_pooled_median, circuit["a_ds"].data)
+const _B_ds_full = Base.invokelatest(seed_pooled_median, circuit["b_ds"].data)
+const _A_gs_full = Base.invokelatest(seed_pooled_median, circuit["a_gs"].data)
+const _B_gs_full = Base.invokelatest(seed_pooled_median, circuit["b_gs"].data)
 
-# Slice the whole circuit grid to δ > DELTA_MIN and Δg_K > DGK_MIN; everything
-# downstream (heatmaps, mean-direction arrows) uses these restricted versions.
+# Slice the δ and Δg_K axes to their upper regions (δ > DELTA_MIN, Δg_K > DGK_MIN),
+# as before; σ_ee is shown in full. Each plane uses the slices of its own two axes.
 const δ_keep = findall(>(DELTA_MIN), _δ_lookup_full)
 const gk_keep = findall(>(DGK_MIN), _gk_lookup_full)
 const δ_lookup = _δ_lookup_full[δ_keep]
 const gk_lookup = _gk_lookup_full[gk_keep]
-const A_grid = _A_grid_full[δ_keep, gk_keep]
-const B_grid = _B_grid_full[δ_keep, gk_keep]
+const A_grid = _A_dg_full[δ_keep, gk_keep]   # dg plane (δ × Δg_K)
+const B_grid = _B_dg_full[δ_keep, gk_keep]
+const A_ds = _A_ds_full[δ_keep, :]           # ds plane (δ × σ_ee)
+const B_ds = _B_ds_full[δ_keep, :]
+const A_gs = _A_gs_full[gk_keep, :]          # gs plane (Δg_K × σ_ee)
+const B_gs = _B_gs_full[gk_keep, :]
 
 # Coarse-grain for display: average each COARSEN×COARSEN block of cells into one
 # pixel (NaN-aware). Only the heatmaps are coarsened; the mean-direction arrows
-# use the full-resolution grid.
+# use the full-resolution grids.
 const COARSEN = 2
 
 "Average `M` into non-overlapping `b×b` blocks; partial edge blocks average over
@@ -203,23 +227,31 @@ function block_average(v::AbstractVector, b)
     return [mean(v[((i - 1) * b + 1):min(i * b, n)]) for i in 1:cld(n, b)]
 end
 
-const A_coarse = Base.invokelatest(block_average, A_grid, COARSEN)
-const B_coarse = Base.invokelatest(block_average, B_grid, COARSEN)
+# Coarsened axes (shared where planes share an axis) and per-plane grids.
 const δ_coarse = Base.invokelatest(block_average, δ_lookup, COARSEN)
 const gk_coarse = Base.invokelatest(block_average, gk_lookup, COARSEN)
+const σ_coarse = Base.invokelatest(block_average, σ_lookup, COARSEN)
+const A_coarse = Base.invokelatest(block_average, A_grid, COARSEN)
+const B_coarse = Base.invokelatest(block_average, B_grid, COARSEN)
+const A_ds_coarse = Base.invokelatest(block_average, A_ds, COARSEN)
+const B_ds_coarse = Base.invokelatest(block_average, B_ds, COARSEN)
+const A_gs_coarse = Base.invokelatest(block_average, A_gs, COARSEN)
+const B_gs_coarse = Base.invokelatest(block_average, B_gs, COARSEN)
 
 # Mean direction vectors of the circuit forward map in (a, b). Rather than
 # drawing full isolines, we summarise each knob's effect as a single net
 # displacement F(param_max) − F(param_min), averaged over the other parameter
 # to marginalise out the operating point.
 #
-# Arrows span the upper region of each axis: δ > 4 and Δg_K > 0.002. (The swept
-# Δg_K axis only reaches 0.005, so "> 0.02" is interpreted on-grid as > 0.002.)
+# Arrows span the upper region of each axis: δ > 4, Δg_K > 0.002 and σ_ee ≥ σ_ee₀.
+# (The swept Δg_K axis only reaches 0.005, so "> 0.02" is read on-grid as > 0.002.)
 #
-#   δ  arrow: δ swept 4 → 5,             averaged over Δg_K ∈ [0.002, 0.005]
-#   Δg_K arrow: Δg_K swept 0.002 → 0.005, averaged over δ ∈ [4, 5]
+#   δ    arrow: δ swept 4 → 5,            averaged over Δg_K ∈ [0.002, 0.005]  (dg plane)
+#   Δg_K arrow: Δg_K swept 0.002 → 0.005, averaged over δ ∈ [4, 5]             (dg plane)
+#   σ_ee arrow: σ_ee swept σ_ee₀ → max,   averaged over δ ∈ [4, 5]             (ds plane)
 const δ_arrow_range = (4.0, maximum(δ_lookup))
 const gk_arrow_range = (0.002, maximum(gk_lookup))
+const sigma_arrow_range = (sigma_ee_0, maximum(σ_lookup))
 
 "Nearest grid index to a target value in a lookup vector."
 _nearest(lookup, v) = argmin(abs.(lookup .- v))
@@ -260,6 +292,12 @@ const δ_dir = mean_direction(
 )
 const gk_dir = mean_direction(
     A_grid, B_grid, gk_lookup, gk_arrow_range,
+    δ_lookup, δ_arrow_range; dim = 2
+)
+# σ_ee direction reads the ds plane (δ × σ_ee): sweep σ_ee (its columns, dim = 2),
+# marginalising over the same upper-δ band the other two arrows use.
+const σ_dir = mean_direction(
+    A_ds, B_ds, σ_lookup, sigma_arrow_range,
     δ_lookup, δ_arrow_range; dim = 2
 )
 
@@ -395,9 +433,9 @@ function plot_hero!(
 
     # Mean-direction arrows, all anchored at the centroid of the experimental
     # scatter (plus an optional per-panel `arrow_offset` in data units to keep the
-    # glyphs clear of the scatter). Two read the circuit forward map (δ, Δg_K) and
-    # two read the bFNS theory map (α, β). The raw displacement vectors span very
-    # different magnitudes, so we rescale each to a fixed on-panel length — these
+    # glyphs clear of the scatter). Three read the circuit forward map (δ, Δg_K,
+    # σ_ee), two read the bFNS theory map (α, β). The raw displacement vectors span
+    # very different magnitudes, so we rescale each to a fixed on-panel length — these
     # glyphs convey *direction*, not magnitude. Length is set to a fraction of the
     # data's diagonal spread so it adapts to whatever the autoscaled axis ends up
     # being.
@@ -406,16 +444,17 @@ function plot_hero!(
     arrow_len = 0.6 * span
     scaled(v) = (n = hypot(v...); n == 0 ? v : (v .* (arrow_len / n)))
 
-    # Two arrow pairs, each at its own anchor so the fans don't overlap: the
-    # circuit (δ, Δg_K) pair sits left of the centroid, the bFNS theory (α, β) pair
+    # Two arrow fans, each at its own anchor so they don't overlap: the circuit
+    # (δ, Δg_K, σ_ee) triple sits left of the centroid, the bFNS theory (α, β) pair
     # to the right. The split is a fraction of the data span. (vector, label,
-    # colour): circuit knobs in green/purple, bFNS orders in red/blue.
+    # colour): circuit knobs in green/purple/orange, bFNS orders in red/blue.
     split = 0.3 * span
     pairs = (
         (
             (cx - split, cy), (
                 (scaled(δ_dir), "δ", qinghai),
                 (scaled(gk_dir), "Δg_K", ianthina),
+                (scaled(σ_dir), "σ_ee", seohae),
             ),
         ),
         (
@@ -466,15 +505,14 @@ function plot_hero!(
 end
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Figure: (a, b) scatters on top, circuit heatmaps below
+# Figure: (a, b) scatters on top, then one heatmap row per circuit plane below
 # ──────────────────────────────────────────────────────────────────────────────
 
-f = FourPanel()
+f = Figure(size = (720, 1080))   # 4 rows × 2 cols at Fathom's 360×270 panel scale
 
-# One sub-grid per panel; each holds [axis | colorbar] in its own columns.
-# gs[1] = top-left (L2/3 hero), gs[2] = top-right (L6 hero),
-# gs[3] = bottom-left (circuit a), gs[4] = bottom-right (circuit b).
-gs = subdivide(f, 2, 2)
+# One sub-grid per panel; each holds [axis | colorbar] in its own columns. Row-major:
+# gs[1,2] = heroes (L2/3, L6); gs[3,4] = dg (a, b); gs[5,6] = ds (a, b); gs[7,8] = gs (a, b).
+gs = subdivide(f, 4, 2)
 
 begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
     ax_l23 = Axis(
@@ -498,25 +536,33 @@ begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
     linkaxes!(ax_l23, ax_l6)
 end
 
-begin # * Circuit row — (δ, Δg_K) → diffusion exponent a
-    ax = Axis(
-        gs[3][1, 1]; xlabel = "δ  (I:E ratio)",
-        ylabel = "Δg_K  (adaptation)",
-        title = "Circuit:  a",
-    )
-
-    p = heatmap!(ax, δ_coarse, gk_coarse, A_coarse; colormap = binarysunset)
-    Colorbar(gs[3][1, 2], p; label = "a", width = 12)
+"Draw one circuit forward-map heatmap (axis + colorbar) into sub-grid `pos`."
+function circuit_heatmap!(pos, x, y, z; xlabel, ylabel, title, clabel)
+    ax = Axis(pos[1, 1]; xlabel = xlabel, ylabel = ylabel, title = title)
+    p = heatmap!(ax, x, y, z; colormap = binarysunset)
+    Colorbar(pos[1, 2], p; label = clabel, width = 12)
+    return ax
 end
 
-begin # * Circuit row — (δ, Δg_K) → spectral exponent b
-    ax = Axis(
-        gs[4][1, 1]; xlabel = "δ  (I:E ratio)",
-        ylabel = "Δg_K  (adaptation)",
-        title = "Circuit:  b"
-    )
-    p = heatmap!(ax, δ_coarse, gk_coarse, B_coarse; colormap = binarysunset)
-    Colorbar(gs[4][1, 2], p; label = "b", width = 12)
+begin # * Circuit heatmap rows — three planes through the working-regime point, a (left) and b (right)
+    δlab = "δ  (I:E ratio)"
+    gklab = "Δg_K  (adaptation)"
+    σlab = "σ_ee  (E→E spread)"
+    # dg plane (δ × Δg_K)
+    circuit_heatmap!(gs[3], δ_coarse, gk_coarse, A_coarse;
+        xlabel = δlab, ylabel = gklab, title = "Circuit:  a", clabel = "a")
+    circuit_heatmap!(gs[4], δ_coarse, gk_coarse, B_coarse;
+        xlabel = δlab, ylabel = gklab, title = "Circuit:  b", clabel = "b")
+    # ds plane (δ × σ_ee)
+    circuit_heatmap!(gs[5], δ_coarse, σ_coarse, A_ds_coarse;
+        xlabel = δlab, ylabel = σlab, title = "Circuit:  a", clabel = "a")
+    circuit_heatmap!(gs[6], δ_coarse, σ_coarse, B_ds_coarse;
+        xlabel = δlab, ylabel = σlab, title = "Circuit:  b", clabel = "b")
+    # gs plane (Δg_K × σ_ee)
+    circuit_heatmap!(gs[7], gk_coarse, σ_coarse, A_gs_coarse;
+        xlabel = gklab, ylabel = σlab, title = "Circuit:  a", clabel = "a")
+    circuit_heatmap!(gs[8], gk_coarse, σ_coarse, B_gs_coarse;
+        xlabel = gklab, ylabel = σlab, title = "Circuit:  b", clabel = "b")
 end
 
 # A matching hierarchy colorbar on each top panel keeps the two axes the
