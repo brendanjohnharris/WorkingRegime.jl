@@ -8,13 +8,14 @@ Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
 Autocorrelations = "b9118d5e-f165-4cbd-b2ae-b030566b7b26"
 Bootstrap = "e28b5b4c-05e8-5b66-bc03-6f0c0a0a06e0"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 Dewdrop = "4456f7f7-597c-4333-80f0-10ee3d430c1b"
 DimensionalData = "0703355e-b756-11e9-17c0-8b28908087d0"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 DrWatson = "634d3b9d-ee7a-5ddf-bec9-22491ea816e1"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
-Foresight = "c6e1034d-1844-4b96-abf2-c5824a5aa8c3"
+Fathom = "05518021-a905-466c-bf96-cf0c89e1b0a0"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 GraphMakie = "1ecd5474-83a3-4783-bb4f-06765db800d2"
 IntervalSets = "8197267c-284f-5f27-9208-e0e47529a953"
@@ -44,6 +45,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
 [sources]
 Dewdrop = {path = "../../../Dewdrop.jl"}
+Fathom = {rev = "main", url = "https://github.com/brendanjohnharris/Fathom.jl"}
 MoreMaps = {rev = "main", url = "https://github.com/brendanjohnharris/MoreMaps.jl"}
 USydClusters = {rev = "main", url = "https://github.com/brendanjohnharris/USydClusters.jl"}
 
@@ -52,12 +54,13 @@ Accessors = "0.1"
 Autocorrelations = "0.1"
 Bootstrap = "2.4"
 CUDA = "5.11.3"
+CairoMakie = "0.15.12"
 DimensionalData = "0.29, 0.30"
 Distributed = "1.11.0"
 Distributions = "0.25.113"
 DrWatson = "2"
 FFTW = "1.10.0"
-Foresight = "0.4.0"
+Fathom = "0.1.0"
 ForwardDiff = "1.3.3"
 GraphMakie = "0.6"
 IntervalSets = "0.7"

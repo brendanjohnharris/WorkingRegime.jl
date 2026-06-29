@@ -549,20 +549,32 @@ begin # * Circuit heatmap rows — three planes through the working-regime point
     gklab = "Δg_K  (adaptation)"
     σlab = "σ_ee  (E→E spread)"
     # dg plane (δ × Δg_K)
-    circuit_heatmap!(gs[3], δ_coarse, gk_coarse, A_coarse;
-        xlabel = δlab, ylabel = gklab, title = "Circuit:  a", clabel = "a")
-    circuit_heatmap!(gs[4], δ_coarse, gk_coarse, B_coarse;
-        xlabel = δlab, ylabel = gklab, title = "Circuit:  b", clabel = "b")
+    circuit_heatmap!(
+        gs[3], δ_coarse, gk_coarse, A_coarse;
+        xlabel = δlab, ylabel = gklab, title = "Circuit:  a", clabel = "a"
+    )
+    circuit_heatmap!(
+        gs[4], δ_coarse, gk_coarse, B_coarse;
+        xlabel = δlab, ylabel = gklab, title = "Circuit:  b", clabel = "b"
+    )
     # ds plane (δ × σ_ee)
-    circuit_heatmap!(gs[5], δ_coarse, σ_coarse, A_ds_coarse;
-        xlabel = δlab, ylabel = σlab, title = "Circuit:  a", clabel = "a")
-    circuit_heatmap!(gs[6], δ_coarse, σ_coarse, B_ds_coarse;
-        xlabel = δlab, ylabel = σlab, title = "Circuit:  b", clabel = "b")
+    circuit_heatmap!(
+        gs[5], δ_coarse, σ_coarse, A_ds_coarse;
+        xlabel = δlab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
+    )
+    circuit_heatmap!(
+        gs[6], δ_coarse, σ_coarse, B_ds_coarse;
+        xlabel = δlab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
+    )
     # gs plane (Δg_K × σ_ee)
-    circuit_heatmap!(gs[7], gk_coarse, σ_coarse, A_gs_coarse;
-        xlabel = gklab, ylabel = σlab, title = "Circuit:  a", clabel = "a")
-    circuit_heatmap!(gs[8], gk_coarse, σ_coarse, B_gs_coarse;
-        xlabel = gklab, ylabel = σlab, title = "Circuit:  b", clabel = "b")
+    circuit_heatmap!(
+        gs[7], gk_coarse, σ_coarse, A_gs_coarse;
+        xlabel = gklab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
+    )
+    circuit_heatmap!(
+        gs[8], gk_coarse, σ_coarse, B_gs_coarse;
+        xlabel = gklab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
+    )
 end
 
 # A matching hierarchy colorbar on each top panel keeps the two axes the

@@ -3,17 +3,19 @@
 #=
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
+using DrWatson
+@quickactivate "WorkingRegime"
 using JLD2
 using CairoMakie
-using Foresight
-using DrWatson
+using Fathom
 using DataFrames
 using TimeseriesTools
 using Statistics
 using Random
-@quickactivate "WorkingRegime"
+set_theme!(Fathom.fathom())
 
-function bootstrapmedian(x; N=10_000, α=0.05)
+
+function bootstrapmedian(x; N = 10_000, α = 0.05)
     x = collect(skipmissing(x))
     x = filter(!isnan, x)
     rng = Random.MersenneTwister(42)
@@ -24,9 +26,7 @@ function bootstrapmedian(x; N=10_000, α=0.05)
     return m, (lo, hi)
 end
 
-CairoMakie.set_theme!(Foresight.foresight(:physics))
-CairoMakie.update_theme!(; Axis=(; xlabelsize=14, ylabelsize=14))
-
+CairoMakie.update_theme!(; Axis = (; xlabelsize = 14, ylabelsize = 14))
 
 
 stimuli_str = ["r\"Natural_Images\"", "spontaneous", "flash_250ms"]
@@ -35,9 +35,9 @@ stimuli_str = ["r\"Natural_Images\"", "spontaneous", "flash_250ms"]
 # SpatiotemporalMotifs dim types (SessionID, Structure, ...) aren't in this
 # project. We keep only the numeric data + dim-name => lookup pairs, which
 # is enough for indexing and bootstrap stats.
-struct NamedArray{T,N}
-    data::Array{T,N}
-    dims::Vector{Pair{Symbol,Vector}}
+struct NamedArray{T, N}
+    data::Array{T, N}
+    dims::Vector{Pair{Symbol, Vector}}
 end
 Base.collect(x::NamedArray) = x.data
 
@@ -49,7 +49,7 @@ function _dim_name(d)
     head = first(split(tname, ('{', ',', ' ')))
     if head == "Dim"
         # "Dim{layer,..." — grab the inner name
-        inner = split(tname, '{'; limit=2)[2]
+        inner = split(tname, '{'; limit = 2)[2]
         return Symbol(first(split(inner, (',', '}'))))
     end
     return Symbol(head)
@@ -71,7 +71,7 @@ end
 
 function JLD2.rconvert(::Type{<:NamedArray}, x)
     data = x.data
-    outer = Pair{Symbol,Vector}[]
+    outer = Pair{Symbol, Vector}[]
     for d in x.dims
         p = _try_dim_pair(d)
         p === nothing || push!(outer, p)
@@ -99,8 +99,10 @@ end
 
 # Load experiment data
 inpath = projectdir("WRExperiment.jl", "data", "plots", "WRExperiment.jld2")
-plot_data = jldopen(f -> Dict(k => f[k] for k in keys(f)), inpath;
-    typemap=_toolsarray_typemap)
+plot_data = jldopen(
+    f -> Dict(k => f[k] for k in keys(f)), inpath;
+    typemap = _toolsarray_typemap
+)
 
 # Load circuit data
 circuit_path = projectdir("WRCircuit.jl", "data", "plots", "circuit_curves.jld2")
@@ -126,59 +128,77 @@ for stim_str in stimuli_str
         # Normalize experiment and circuit to same range
         normalize(x) = (x .- minimum(x)) ./ (maximum(x) - minimum(x))
 
-        ax = Axis(f[1, 1]; ylabel="MAD (arb. units)",
-            xlabel="Time lag (s)",
-            title="Mean absolute deviation",
-            xscale=log10, yscale=log10)
+        ax = Axis(
+            f[1, 1]; ylabel = "MAD (arb. units)",
+            xlabel = "Time lag (s)",
+            title = "Mean absolute deviation",
+            xscale = log10, yscale = log10
+        )
 
         mad_norm = normalize(log10.(mad.mu))
         mad_σl_norm = normalize(log10.(mad.σl))
         mad_σh_norm = normalize(log10.(mad.σh))
-        band!(ax, mad.t_all, exp10.(mad_σl_norm), exp10.(mad_σh_norm),
-            color=experiment_color, alpha=0.5)
-        lines!(ax, mad.t_all, exp10.(mad_norm), color=experiment_color, label="Experiment\n(LFP)")
+        band!(
+            ax, mad.t_all, exp10.(mad_σl_norm), exp10.(mad_σh_norm),
+            color = experiment_color, alpha = 0.5
+        )
+        lines!(ax, mad.t_all, exp10.(mad_norm), color = experiment_color, label = "Experiment\n(LFP)")
 
         mad_fit_vals = exp10.(mad.meanintercept .+ mad.meanslope .* log10.(mad.fit_t))
 
         idxs = mad.fit_t .< 0.005
-        lines!(ax, mad.fit_t[idxs] .* 2, exp10.(normalize(log10.(mad_fit_vals)))[idxs],
-            linestyle=:dash, color=experiment_color)
+        lines!(
+            ax, mad.fit_t[idxs] .* 2, exp10.(normalize(log10.(mad_fit_vals)))[idxs],
+            linestyle = :dash, color = experiment_color
+        )
 
         circuit_mad_norm = normalize(log10.(circuit.mad.mu))
-        lines!(ax, circuit.mad.t, exp10.(circuit_mad_norm);
-            color=circuit_color, label="Circuit\n(input)")
+        lines!(
+            ax, circuit.mad.t, exp10.(circuit_mad_norm);
+            color = circuit_color, label = "Circuit\n(input)"
+        )
 
         idxs = circuit.mad.fit_t .< 0.005
-        lines!(ax, circuit.mad.fit_t[idxs] ./ 2, exp10.(normalize(log10.(circuit.mad.fit_vals)))[idxs];
-            color=circuit_color, linestyle=:dash)
+        lines!(
+            ax, circuit.mad.fit_t[idxs] ./ 2, exp10.(normalize(log10.(circuit.mad.fit_vals)))[idxs];
+            color = circuit_color, linestyle = :dash
+        )
 
-        text!(ax, 1e-2, 10^0.6;
-            text="a = $(round(mad.meanslope, sigdigits=2))",
-            color=experiment_color, align=(:left, :top))
-        text!(ax, 10^(-3.35), 10^1;
-            text="a = $(round(circuit.mad.exponent, sigdigits=2))",
-            color=circuit_color, align=(:left, :top))
+        text!(
+            ax, 1.0e-2, 10^0.6;
+            text = "a = $(round(mad.meanslope, sigdigits = 2))",
+            color = experiment_color, align = (:left, :top)
+        )
+        text!(
+            ax, 10^(-3.35), 10^1;
+            text = "a = $(round(circuit.mad.exponent, sigdigits = 2))",
+            color = circuit_color, align = (:left, :top)
+        )
 
-        axislegend(ax; position=:rb, fontsize=12)
+        axislegend(ax; position = :rb, fontsize = 12)
 
         ax.limits = ((10^(-3.4), 10^0.1), nothing)
     end
 
     # Panel 2: PSD curve (normalized)
     begin
-        ax = Axis(f[1, 2];
-            xlabel="Frequency (Hz)",
-            ylabel="PSD (arb. units)",
-            title="Power spectral density",
-            xscale=log10, yscale=log10,
-            xticks=[3, 10, 30, 100])
+        ax = Axis(
+            f[1, 2];
+            xlabel = "Frequency (Hz)",
+            ylabel = "PSD (arb. units)",
+            title = "Power spectral density",
+            xscale = log10, yscale = log10,
+            xticks = [3, 10, 30, 100]
+        )
 
         psd_norm = normalize(log10.(psd.μ))
         psd_σl_norm = normalize(log10.(psd.σl))
         psd_σh_norm = normalize(log10.(psd.σh))
-        lines!(ax, psd.f, exp10.(psd_norm); color=(experiment_color, 0.8))
-        band!(ax, psd.f, exp10.(psd_σl_norm), exp10.(psd_σh_norm);
-            color=(experiment_color, 0.32))
+        lines!(ax, psd.f, exp10.(psd_norm); color = (experiment_color, 0.8))
+        band!(
+            ax, psd.f, exp10.(psd_σl_norm), exp10.(psd_σh_norm);
+            color = (experiment_color, 0.32)
+        )
 
         # # Peaks (normalized)
         # psd_peak_norm = normalize(log10.(psd.peak_vals))
@@ -190,55 +210,77 @@ for stim_str in stimuli_str
         #     fontsize=16, offset=(0, 5))
 
         # FOOOF fit line
-        lines!(ax, psd.f, exp10.(normalize(log10.(psd.fooof)));
-            color=experiment_color,
-            linestyle=:dash)
+        lines!(
+            ax, psd.f, exp10.(normalize(log10.(psd.fooof)));
+            color = experiment_color,
+            linestyle = :dash
+        )
 
         # Circuit overlay (normalized to same range)
         circuit_psd_norm = normalize(log10.(circuit.psd.mu))
-        lines!(ax, circuit.psd.f, exp10.(circuit_psd_norm) .* 1.35;
-            color=circuit_color)
-        lines!(ax, circuit.psd.fit_f, 1.25 .* exp10.(normalize(log10.(circuit.psd.fit_vals)));
-            color=circuit_color, linestyle=:dash)
+        lines!(
+            ax, circuit.psd.f, exp10.(circuit_psd_norm) .* 1.35;
+            color = circuit_color
+        )
+        lines!(
+            ax, circuit.psd.fit_f, 1.25 .* exp10.(normalize(log10.(circuit.psd.fit_vals)));
+            color = circuit_color, linestyle = :dash
+        )
 
-        text!(ax, 7, 10^0.3;
-            text="b = $(round(psd.spectral_exponent_median; sigdigits=3))",
-            color=experiment_color, align=(:left, :top))
-        text!(ax, 20, 10;
-            text="b = $(round(circuit.psd.exponent; sigdigits=3))",
-            color=circuit_color, align=(:left, :bottom))
+        text!(
+            ax, 7, 10^0.3;
+            text = "b = $(round(psd.spectral_exponent_median; sigdigits = 3))",
+            color = experiment_color, align = (:left, :top)
+        )
+        text!(
+            ax, 20, 10;
+            text = "b = $(round(circuit.psd.exponent; sigdigits = 3))",
+            color = circuit_color, align = (:left, :bottom)
+        )
 
         ax.limits = ((2, 500), nothing)
     end
 
     # Panel 3: Fano factor curve (unnormalized, single axis)
     begin
-        ax = Axis(f[1, 3];
-            xlabel="Time lag (s)",
-            ylabel="Fano factor",
-            title="Fano factor",
-            xscale=log10, yscale=log10)
+        ax = Axis(
+            f[1, 3];
+            xlabel = "Time lag (s)",
+            ylabel = "Fano factor",
+            title = "Fano factor",
+            xscale = log10, yscale = log10
+        )
 
-        band!(ax, 0.001 .* fano.t_all, fano.sl, fano.su, color=experiment_color, alpha=0.3)
-        lines!(ax, 0.001 .* fano.t_all, fano.mu, color=experiment_color)
+        band!(ax, 0.001 .* fano.t_all, fano.sl, fano.su, color = experiment_color, alpha = 0.3)
+        lines!(ax, 0.001 .* fano.t_all, fano.mu, color = experiment_color)
 
-        lines!(ax, 0.001 .* exp10.(fano.fit_t_range) ./ 2,
+        lines!(
+            ax, 0.001 .* exp10.(fano.fit_t_range) ./ 2,
             exp10.(fano.mintercept .+ fano.mslope .* fano.fit_t_range);
-            color=experiment_color, linestyle=:dash, linewidth=3)
+            color = experiment_color, linestyle = :dash, linewidth = 3
+        )
 
-        lines!(ax, 0.001 .* circuit.fano.t, circuit.fano.mu;
-            color=circuit_color)
+        lines!(
+            ax, 0.001 .* circuit.fano.t, circuit.fano.mu;
+            color = circuit_color
+        )
         idxs = 10 .< circuit.fano.t .< 100
-        lines!(ax, 0.001 .* circuit.fano.t[idxs] ./ 2, circuit.fano.mu[idxs];
-            color=circuit_color, linestyle=:dash)
+        lines!(
+            ax, 0.001 .* circuit.fano.t[idxs] ./ 2, circuit.fano.mu[idxs];
+            color = circuit_color, linestyle = :dash
+        )
 
 
-        text!(ax, 0.001 .* 40, 10^0.32;
-            text="c = $(round(fano.mslope, digits=2))",
-            color=experiment_color, align=(:left, :center))
-        text!(ax, 0.001 .* 1.2, 1.4;
-            text="c = $(round(circuit.fano.exponent, digits=2))",
-            color=circuit_color, align=(:left, :center))
+        text!(
+            ax, 0.001 .* 40, 10^0.32;
+            text = "c = $(round(fano.mslope, digits = 2))",
+            color = experiment_color, align = (:left, :center)
+        )
+        text!(
+            ax, 0.001 .* 1.2, 1.4;
+            text = "c = $(round(circuit.fano.exponent, digits = 2))",
+            color = circuit_color, align = (:left, :center)
+        )
     end
 
     # addlabels!(f)

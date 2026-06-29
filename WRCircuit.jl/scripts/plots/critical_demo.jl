@@ -11,7 +11,7 @@ using LinearAlgebra
 using Optim
 using MoreMaps
 WRCircuit.@preamble
-set_theme!(foresight(:physics))
+set_theme!(fathom(:physics))
 outfile = datadir("critical_demo.jld2")
 
 begin

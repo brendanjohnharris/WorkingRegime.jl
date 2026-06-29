@@ -6,8 +6,12 @@ Fathom = "05518021-a905-466c-bf96-cf0c89e1b0a0"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 TimeseriesTools = "380cddd1-6ef2-46ca-b087-e7151fb095ff"
 
-[sources]
-Fathom = {rev = "main", url = "https://github.com/brendanjohnharris/Fathom.jl"}
+[extras]
+CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
+
+[sources.Fathom]
+rev = "main"
+url = "https://github.com/brendanjohnharris/Fathom.jl"
 
 [workspace]
 projects = ["WRCircuit.jl"]

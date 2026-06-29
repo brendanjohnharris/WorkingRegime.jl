@@ -12,8 +12,10 @@ using LinearAlgebra
 using Optim
 using MoreMaps
 using ForwardDiff
+using Fathom
+using CairoMakie
 WRCircuit.@preamble
-set_theme!(foresight(:physics))
+set_theme!(Fathom.fathom(:physics))
 
 begin
     x = load(datadir("critical_demo.jld2"), "x")
@@ -83,7 +85,7 @@ if :I ∈ lookup(x, Population)  # * Spike raster
         idxs = s .∈ [intrvl]
         scatter!(
             ax, ustripall(s[idxs] .- minimum(intrvl)), i * ones(sum(idxs)),
-            color = cucumber,
+            color = qinghai,
             markersize = 3
         )
     end
@@ -93,7 +95,7 @@ if :I ∈ lookup(x, Population)  # * Spike raster
         idxs = s .∈ [intrvl]
         scatter!(
             ax2, ustripall(s[idxs] .- minimum(intrvl)), i * ones(sum(idxs)),
-            color = crimson,
+            color = bermejo,
             markersize = 3
         )
     end
@@ -157,7 +159,7 @@ end
 #     ax = Axis(f[1, 1]; xlabel = "Log frequency", ylabel
 #               = "Log power", title = "MUA spectrum with fit")
 #     lines!(ax, ls; color = :blue)
-#     lines!(ax, lookup(ls, 1), oneoneff(lookup(ls, 1), params); color = crimson)
+#     lines!(ax, lookup(ls, 1), oneoneff(lookup(ls, 1), params); color = bermejo)
 #     display(f)
 # end
 # begin # * Mean membrane potential in a local patch
@@ -208,7 +210,7 @@ end
 #     ax = Axis(f[1, 1]; xlabel = "Frequency (Hz)", ylabel
 #               = "Power", title = "MUA spectrum with fit")
 #     lines!(ax, ls; color = :blue)
-#     lines!(ax, lookup(ls, 1), oneoneff(lookup(ls, 1), params); color = crimson),
+#     lines!(ax, lookup(ls, 1), oneoneff(lookup(ls, 1), params); color = bermejo),
 #     display(f)
 # end
 
@@ -413,24 +415,26 @@ begin # * Calculate spectra and MAD
         madev(v, round.(Int, logrange(10, 10000, length = 100) |> unique) .* step(v))
     end
 end
+
 begin # * Fits
     f_range = 10u"Hz" .. 1000u"Hz"
     tau_range = 0u"s" .. 1u"s"
     @info "Fitting spectra"
-    spectrum_fit = map(Chart(Threaded()), spectra) do s
+    spectrum_fit = map(Chart(Threaded(), ProgressLogger()), spectra) do s
         fit_spectrum(s; components = 1, peaks = 0, f_range)
     end
-    spectrum_fits = map(Chart(Threaded()), spectra) do s
+    spectrum_fits = map(Chart(Threaded(), ProgressLogger()), spectra) do s
         fit_spectrums(s; components = 1, peaks = 0, f_range)
     end
     @info "Fitting MADs"
-    mad_fit = map(Chart(Threaded()), mads) do m
+    mad_fit = map(Chart(Threaded(), ProgressLogger()), mads) do m
         fit_mad(m; components = 2, peaks = 0, tau_range)
     end
-    mad_fits = map(Chart(Threaded()), mads) do m
+    mad_fits = map(Chart(Threaded(), ProgressLogger()), mads) do m
         fit_mads(m; components = 2, peaks = 0, tau_range)
     end
 end
+
 if false
     f = SixPanel()
     gs = permutedims(subdivide(f, 3, 2), (2, 1))
@@ -445,9 +449,9 @@ if false
             gs[i, 1]; xscale = log10, yscale = log10, title = string(v),
             xlabel = "Frequency (Hz)", ylabel = "PSD"
         )
-        lines!(ax, s; color = cornflowerblue, alpha = 0.4)
-        # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
-        lines!(ax, fitted_s; color = crimson, linestyle = :dash)
+        lines!(ax, s; color = baikal, alpha = 0.4)
+        # scatter!(ax, _s; color = baikal, markersize = 10)
+        lines!(ax, fitted_s; color = bermejo, linestyle = :dash)
         text = m.params.components.β |> last
         text = "b = $(round(text, digits = 2))"
         text!(
@@ -468,9 +472,9 @@ if false
             gs[i, 2]; xscale = log10, yscale = log10, title = string(v),
             xlabel = "Time lag (s)", ylabel = "MSD"
         )
-        lines!(ax, s; color = cornflowerblue, alpha = 0.4)
-        # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
-        lines!(ax, fitted_s; color = crimson, linestyle = :dash)
+        lines!(ax, s; color = baikal, alpha = 0.4)
+        # scatter!(ax, _s; color = baikal, markersize = 10)
+        lines!(ax, fitted_s; color = bermejo, linestyle = :dash)
         text = m.params.components.β |> first
         text = "a = $(round(text, digits = 2))"
         text!(
@@ -500,9 +504,9 @@ begin # * Individual statistics
             f[1, 1]; xscale = log10, yscale = log10, title = string(v),
             xlabel = "Frequency (Hz)", ylabel = "PSD"
         )
-        lines!(ax, s; color = cornflowerblue)
-        # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
-        lines!(ax, fitted_s; color = crimson, linestyle = :dash)
+        lines!(ax, s; color = baikal)
+        # scatter!(ax, _s; color = baikal, markersize = 10)
+        lines!(ax, fitted_s; color = bermejo, linestyle = :dash)
         text = m.params.components.β |> last
         text = "b = $(round(text, digits = 2))"
         text!(
@@ -526,9 +530,9 @@ begin # * Individual statistics
             f[1, 1]; xscale = log10, yscale = log10, title = string(v),
             xlabel = "Time lag (s)"
         )
-        lines!(ax, s; color = cornflowerblue)
-        # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
-        lines!(ax, fitted_s; color = crimson, linestyle = :dash)
+        lines!(ax, s; color = baikal)
+        # scatter!(ax, _s; color = baikal, markersize = 10)
+        lines!(ax, fitted_s; color = bermejo, linestyle = :dash)
         text = m.params.components.β |> first
         text = "a = $(round(text, digits = 2))"
         text!(
@@ -619,7 +623,7 @@ begin # * Save pre-computed curves for combined plotting
     )
 
     mkpath(datadir("plots"))
-    # jldsave(datadir("plots", "circuit_curves.jld2"); circuit_curves)
+    jldsave(datadir("plots", "circuit_curves.jld2"); circuit_curves)
     @info "Saved circuit curves to $(datadir("plots", "circuit_curves.jld2"))"
 end
 
@@ -635,9 +639,9 @@ begin # * Supplementary figure: distribution of input distribution parameters
         )
         ziggurat!(
             ax, data; bins = 20, normalization = :pdf,
-            color = cornflowerblue
+            color = baikal
         )
-        vlines!(ax, [m]; color = crimson, linestyle = :dash)
+        vlines!(ax, [m]; color = bermejo, linestyle = :dash)
     end
     display(sf)
     wsave(plotdir("critical_demo", "input_distribution_parameters.pdf"), sf)
@@ -762,9 +766,9 @@ begin # * Additional properties: image and distribution fit
     # bins = 0.1:0.1:5
     # is = input[:, idx] # Sample neuron
     # ziggurat!(ax, is; bins, normalization = :pdf,
-    #           color = cornflowerblue)
+    #           color = baikal)
     # S = Stable(ps...)
-    # lines!(ax, bins, pdf.(S, bins); color = crimson, linestyle = :dash)
+    # lines!(ax, bins, pdf.(S, bins); color = bermejo, linestyle = :dash)
 
     sf = TwoPanel()
     begin # * Add input fits to secondary figure
@@ -780,9 +784,9 @@ begin # * Additional properties: image and distribution fit
             limits = ((1, 1000), nothing),
             yticks = WilkinsonTicks(3; k_max = 4) |> LogTicks
         )
-        lines!(ax, decompose(s)...; color = cornflowerblue)
-        # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
-        lines!(ax, fitted_s .* 0.7; color = crimson, linestyle = :dash)
+        lines!(ax, decompose(s)...; color = baikal)
+        # scatter!(ax, _s; color = baikal, markersize = 10)
+        lines!(ax, fitted_s .* 0.7; color = bermejo, linestyle = :dash)
         text = m.params.components.β |> last
         text = "b = $(round(text, digits = 2))"
         text!(
@@ -798,9 +802,9 @@ begin # * Additional properties: image and distribution fit
             sf[1, 1]; xscale = log10, yscale = log10, title = "Input MAD",
             xlabel = "Time lag (s)"
         )
-        lines!(ax, s; color = cornflowerblue)
-        # scatter!(ax, _s; color = cornflowerblue, markersize = 10)
-        lines!(ax, fitted_s; color = crimson, linestyle = :dash)
+        lines!(ax, s; color = baikal)
+        # scatter!(ax, _s; color = baikal, markersize = 10)
+        lines!(ax, fitted_s; color = bermejo, linestyle = :dash)
         text = m.params.components.β |> first
         text = "a = $(round(text, digits = 2))"
         text!(
@@ -850,10 +854,10 @@ begin # * Additional properties: image and distribution fit
 
         bandwidth!(ax, decompose(muf)...; bandwidth = collect(s), alpha = 0.4) # ! Bandwidth 1 sd wide
         lines!(ax, muf)
-        # lines!.([ax], eachcol(fano)[1:500:end], linewidth=1, alpha=0.5, color=cornflowerblue)
+        # lines!.([ax], eachcol(fano)[1:500:end], linewidth=1, alpha=0.5, color=baikal)
 
         fitted_fano = predict(ma, muf)
-        lines!(ax, fitted_fano; color = crimson, linestyle = :dash)
+        lines!(ax, fitted_fano; color = bermejo, linestyle = :dash)
     end
 
     begin # * Short trace
@@ -861,9 +865,10 @@ begin # * Additional properties: image and distribution fit
             gg[1, 1]; title = "Membrane potential (mV)",
             yticks = WilkinsonTicks(3; k_max = 3), xlabel = "Time (s)"
         )
-        hlines!(axv1, [-50]; color = crimson)
-        hlines!(axv1, [-70]; color = crimson, linestyle = :dash)
-        hlines!(axv1, [mean(V)]; color = :gray, linestyle = :dash)
+        hlines!(axv1, [-50]; color = bermejo)
+        hlines!(axv1, [-70]; color = bermejo, linestyle = :dash)
+        mn = mean(V[1:50:end, :])
+        hlines!(axv1, [mn]; color = :gray, linestyle = :dash)
         y = V[input_ts, myna] |> ustripall
         ts = times(y) .- times(y)[1]
         lines!(axv1, ts, y, linewidth = 3)
@@ -885,8 +890,8 @@ begin # * Additional properties: image and distribution fit
             limits = (nothing, (-1, 3))
         )
 
-        # hlines!(ax, [-50]; color = crimson)
-        # hlines!(ax, [-70]; color = crimson, linestyle = :dash)
+        # hlines!(ax, [-50]; color = bermejo)
+        # hlines!(ax, [-70]; color = bermejo, linestyle = :dash)
         # hlines!(ax, [mean(V)]; color = :gray, linestyle = :dash)
         y = vi[input_ts, myna] |> ustripall
         ts = times(y) .- times(y)[1]
@@ -905,9 +910,9 @@ begin # * Additional properties: image and distribution fit
         bins = bins[2:end]
         ziggurat!(
             axv2, v; bins, normalization = :pdf,
-            color = cornflowerblue
+            color = baikal
         )
-        vlines!(axv2, [mean(V)]; color = :gray, linestyle = :dash)
+        vlines!(axv2, [mn]; color = :gray, linestyle = :dash)
     end
     begin # * step size distribution
         axvi2 = Axis(
@@ -925,7 +930,7 @@ begin # * Additional properties: image and distribution fit
         bins = bins[2:end]
         ziggurat!(
             axvi2, vi[1:10:end]; bins, normalization = :pdf,
-            color = cornflowerblue
+            color = baikal
         )
         # hlines!(ax, [mean(V)]; color = :gray, linestyle = :dash)
 

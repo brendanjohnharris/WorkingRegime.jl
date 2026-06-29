@@ -39,12 +39,12 @@ WRCircuit.@preamble
 # ──────────────────────────────────────────────────────────────────────────────
 try
     begin # * Add procs and load code everywhere
-        USydClusters.Physics.addprocs(
-            28; ncpus = 1, mem = "8GB", walltime = "23:00:00",
-            queue = `taiji`
-        )
-        USydClusters.Physics.addprocs(10; ncpus = 1, mem = "8GB", walltime = "23:00:00")
-        addprocs(8) # Local
+        # USydClusters.Physics.addprocs(
+        #     28; ncpus = 1, mem = "8GB", walltime = "23:00:00",
+        #     queue = `taiji`
+        # )
+        USydClusters.Physics.addprocs(16; ncpus = 1, mem = "8GB", walltime = "23:00:00")
+        addprocs(16) # Local
 
         @everywhere begin
             using WRCircuit
@@ -61,7 +61,7 @@ try
     # ("all exponents"); the prototype used 50 purely for speed. The per-neuron fits
     # themselves (per_neuron / diffusion_exponents / spectral_exponents) live in
     # WRCircuit, so workers pick them up via `@everywhere using WRCircuit`.
-    const neuron_step = 10
+    neuron_step = 10
 
     # ──────────────────────────────────────────────────────────────────────────────
     # Index every result file, then build one 3-D (axis1, axis2, seed) grid per plane

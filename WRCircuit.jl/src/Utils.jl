@@ -16,7 +16,7 @@ function _preamble()
         using TimeseriesTools
         using Makie
         using TimeseriesMakie
-        using Foresight
+        using Fathom
         using LinearAlgebra
         using Distributed
         using Term

@@ -8,7 +8,7 @@ DrWatson.@quickactivate "WRCircuit"
 using WRCircuit
 using JLD2
 WRCircuit.@preamble
-set_theme!(foresight(:physics))
+set_theme!(fathom(:physics))
 
 begin # * Load data
     x = load(datadir("critical_demo.jld2"), "x")
