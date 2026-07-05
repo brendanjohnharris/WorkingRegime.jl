@@ -29,7 +29,7 @@ TerminalLoggers = "5d786b92-1e48-4d6f-9151-6b4477ca9bed"
 TimeseriesBase = "c2aba7f5-82a4-4c45-a741-402bb41ee238"
 TimeseriesMakie = "5e3e9a77-7bbf-480c-931c-0802e2453f5a"
 TimeseriesTools = "380cddd1-6ef2-46ca-b087-e7151fb095ff"
-USydClusters = "0d53aa51-fded-4285-958f-a79747f7b7b4"
+AcademicClusters = "0d53aa51-fded-4285-958f-a79747f7b7b4"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
 [compat]

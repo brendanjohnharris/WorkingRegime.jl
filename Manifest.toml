@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "5747fdbc489b4110295ede9afbbffb528a09c8c9"
+project_hash = "7590e1b4e9826138f59c2b6c9059e6f49a76bef9"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "d9aaef7c63466eee4de23b4d9dad03629df54bea"
@@ -37,6 +37,14 @@ version = "1.5.0"
 git-tree-sha1 = "2d9c9a55f9c93e8887ad391fbae72f8ef55e1177"
 uuid = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
 version = "0.4.5"
+
+[[deps.AcademicClusters]]
+deps = ["Distributed", "Preferences"]
+path = "../../AcademicClusters"
+repo-rev = "main"
+repo-url = "https://github.com/brendanjohnharris/AcademicClusters.jl"
+uuid = "0d53aa51-fded-4285-958f-a79747f7b7b4"
+version = "0.1.0"
 
 [[deps.Accessors]]
 deps = ["CompositionsBase", "ConstructionBase", "Dates", "InverseFunctions", "MacroTools"]
@@ -2357,14 +2365,6 @@ git-tree-sha1 = "4d4ed7f294cda19382ff7de4c137d24d16adc89b"
 uuid = "981d1d27-644d-49a2-9326-4793e63143c3"
 version = "0.1.0"
 
-[[deps.USydClusters]]
-deps = ["Distributed", "Preferences"]
-git-tree-sha1 = "bd320d18974bb41190aa8325fc8e9a0034d0fac3"
-repo-rev = "main"
-repo-url = "https://github.com/brendanjohnharris/USydClusters.jl"
-uuid = "0d53aa51-fded-4285-958f-a79747f7b7b4"
-version = "1.0.0-DEV"
-
 [[deps.UUIDs]]
 deps = ["Random", "SHA"]
 uuid = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
@@ -2418,7 +2418,7 @@ weakdeps = ["LLVM"]
     UnsafeAtomicsLLVM = ["LLVM"]
 
 [[deps.WRCircuit]]
-deps = ["Accessors", "Autocorrelations", "Bootstrap", "CUDA", "CairoMakie", "Dewdrop", "DimensionalData", "Distributed", "Distributions", "DrWatson", "FFTW", "Fathom", "ForwardDiff", "GraphMakie", "IntervalSets", "JLD2", "Libdl", "LinearAlgebra", "Logging", "Makie", "MeanSquaredDisplacement", "MoreMaps", "Normalization", "Optim", "ProgressLogging", "Random", "SparseArrays", "StableDistributions", "Statistics", "StatsBase", "Suppressor", "Term", "TerminalLoggers", "TimeseriesBase", "TimeseriesMakie", "TimeseriesTools", "USydClusters", "Unitful"]
+deps = ["AcademicClusters", "Accessors", "Autocorrelations", "Bootstrap", "CUDA", "CairoMakie", "Dewdrop", "DimensionalData", "Distributed", "Distributions", "DrWatson", "FFTW", "Fathom", "ForwardDiff", "GraphMakie", "IntervalSets", "JLD2", "Libdl", "LinearAlgebra", "Logging", "Makie", "MeanSquaredDisplacement", "MoreMaps", "Normalization", "Optim", "ProgressLogging", "Random", "SparseArrays", "StableDistributions", "Statistics", "StatsBase", "Suppressor", "Term", "TerminalLoggers", "TimeseriesBase", "TimeseriesMakie", "TimeseriesTools", "Unitful"]
 path = "WRCircuit.jl"
 uuid = "a2fb53ce-e249-4e8c-8865-d217552c1552"
 version = "1.0.0-DEV"

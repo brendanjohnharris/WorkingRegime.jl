@@ -30,7 +30,7 @@ using Optim
 using MoreMaps
 using Statistics
 using Distributed
-using USydClusters
+using AcademicClusters
 import ForwardDiff
 WRCircuit.@preamble
 
@@ -39,8 +39,8 @@ WRCircuit.@preamble
 # ──────────────────────────────────────────────────────────────────────────────
 try
     begin # * Add procs and load code everywhere
-        USydClusters.Physics.distributeprocs(Inf; mem = "8GB", ncpus = 1)
-        666
+        AcademicClusters.USydPhysics.distributeprocs(Inf; mem = "8GB", ncpus = 1)
+
         @everywhere begin
             using WRCircuit
             @info "WRCircuit loaded on worker $(myid())"
@@ -133,7 +133,6 @@ try
     # Fit exponents across all three planes (one pass each; missing cells -> empty vectors)
     # ──────────────────────────────────────────────────────────────────────────────
 
-    "Fit `exponents` to the array loaded under `key` for every file in `grid`, fitting every `step`-th neuron; missing cells -> empty vectors. Distributes one cell per worker via Pmap."
     function fit_grid(grid, key, exponents; step)
         return map(Chart(Pmap(), LogLogger(100)), grid) do f
             isnothing(f) && return Float64[]

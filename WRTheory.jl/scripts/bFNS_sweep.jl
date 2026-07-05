@@ -9,16 +9,18 @@ using WRTheory
 using StableDistributions
 using StochasticDiffEq
 using Distributed
-using USydClusters
+using AcademicClusters
 WRTheory.@preamble()
 set_theme!(foresight(:physics))
 
 import FractionalNeuralSampling: Density
 
 begin # * Add procs
-    USydClusters.Physics.addprocs(24; ncpus = 1, mem = "6GB", walltime = "23:00:00",
-                                  queue = `taiji`)
-    USydClusters.Physics.addprocs(32; ncpus = 1, mem = "6GB", walltime = "23:00:00")
+    AcademicClusters.USydPhysics.addprocs(
+        24; ncpus = 1, mem = "6GB", walltime = "23:00:00",
+        queue = `taiji`
+    )
+    AcademicClusters.USydPhysics.addprocs(32; ncpus = 1, mem = "6GB", walltime = "23:00:00")
     addprocs(10) # Local
 
     @everywhere using WRTheory
@@ -40,14 +42,16 @@ begin # * Create parameter grid
     γs = [γ] |> Dim{:γ}
     ηs = [η] |> Dim{:η}
 
-    shared_params = (; tspan = 25000.0, # ms
-                     dt = 0.1,
-                     u0 = [-0.0, 0.0],
-                     domain = -10.0 .. 10.0,
-                     boundaries = PeriodicBox(-5 .. 5),
-                     approx_n_modes = 1000,
-                     τ = 1000.0,
-                     λ = 1e-4)
+    shared_params = (;
+        tspan = 25000.0, # ms
+        dt = 0.1,
+        u0 = [-0.0, 0.0],
+        domain = -10.0 .. 10.0,
+        boundaries = PeriodicBox(-5 .. 5),
+        approx_n_modes = 1000,
+        τ = 1000.0,
+        λ = 1.0e-4,
+    )
 end
 
 if false # * Heatmap of H values
@@ -64,13 +68,16 @@ end
 
 begin # * Map over parameters for flat potential
     params = (;
-              𝜋 = test_density(:flat),
-              shared_params...)
+        𝜋 = test_density(:flat),
+        shared_params...,
+    )
 
     @info "Running flat sweep..."
-    C = Chart(Iterators.product,
-              Pmap(),
-              ProgressLogger(1000))
+    C = Chart(
+        Iterators.product,
+        Pmap(),
+        ProgressLogger(1000)
+    )
     res = map(simulate_bFNS_sweep(params), C, αs, βs, γs, ηs, obs)
     out = map(keys(first(res))) do k
         string(k) => map(Base.Fix2(getindex, k), res)
@@ -81,13 +88,16 @@ end
 
 begin # * Map over parameters for unimodal potential
     params = (;
-              𝜋 = test_density(:unimodal),
-              shared_params...)
+        𝜋 = test_density(:unimodal),
+        shared_params...,
+    )
 
     @info "Running unimodal sweep..."
-    C = Chart(Iterators.product,
-              Pmap(),
-              ProgressLogger(1000))
+    C = Chart(
+        Iterators.product,
+        Pmap(),
+        ProgressLogger(1000)
+    )
     res = map(simulate_bFNS_sweep(params), C, αs, βs, γs, ηs, obs)
     out = map(keys(first(res))) do k
         string(k) => map(Base.Fix2(getindex, k), res)
@@ -98,13 +108,16 @@ end
 
 begin # * Map over parameters for bimodal potential
     params = (;
-              𝜋 = test_density(:bimodal),
-              shared_params...)
+        𝜋 = test_density(:bimodal),
+        shared_params...,
+    )
 
     @info "Running bimodal sweep..."
-    C = Chart(Iterators.product,
-              Pmap(),
-              ProgressLogger(1000))
+    C = Chart(
+        Iterators.product,
+        Pmap(),
+        ProgressLogger(1000)
+    )
     res = map(simulate_bFNS_sweep(params), C, αs, βs, γs, ηs, obs)
     out = map(keys(first(res))) do k
         string(k) => map(Base.Fix2(getindex, k), res)

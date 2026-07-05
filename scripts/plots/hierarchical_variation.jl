@@ -135,6 +135,8 @@ const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
 
 const DELTA_MIN = 4
 const DGK_MIN = 0.001
+const SIGMA_MIN = 0.06
+const SIGMA_MAX = 0.075
 
 const outdir = plotsdir("hierarchical_variation")
 mkpath(outdir)
@@ -157,7 +159,6 @@ circuit = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), circuit_path;
     typemap = _toolsarray_typemap
 )
-const sigma_ee_0 = circuit["sigma_ee_0"]   # σ_ee at the dg-plane / operating point
 
 "NaN-aware median of one cell's per-neuron exponents POOLED across all seeds (the
 trailing grid axis). Each (axis₁, axis₂, seed) cell may be a plain `Vector{Float64}`
@@ -179,7 +180,7 @@ end
 # stricter world-age rules for global bindings defined at top-level.
 const _δ_lookup_full = circuit["delta"]
 const _gk_lookup_full = circuit["Delta_g_K"]
-const σ_lookup = circuit["sigma_ee"]   # σ_ee shown over its full swept range
+const _σ_lookup_full = circuit["sigma_ee"]
 # Full-resolution per-cell median grids, one per plane (rows × cols):
 #   dg: (δ × Δg_K), ds: (δ × σ_ee), gs: (Δg_K × σ_ee).
 const _A_dg_full = Base.invokelatest(seed_pooled_median, circuit["a_dg"].data)
@@ -189,18 +190,20 @@ const _B_ds_full = Base.invokelatest(seed_pooled_median, circuit["b_ds"].data)
 const _A_gs_full = Base.invokelatest(seed_pooled_median, circuit["a_gs"].data)
 const _B_gs_full = Base.invokelatest(seed_pooled_median, circuit["b_gs"].data)
 
-# Slice the δ and Δg_K axes to their upper regions (δ > DELTA_MIN, Δg_K > DGK_MIN),
-# as before; σ_ee is shown in full. Each plane uses the slices of its own two axes.
+# Slice each axis to its region of interest: δ > DELTA_MIN, Δg_K > DGK_MIN and
+# σ_ee ∈ [SIGMA_MIN, SIGMA_MAX]. Each plane uses the slices of its own two axes.
 const δ_keep = findall(>(DELTA_MIN), _δ_lookup_full)
 const gk_keep = findall(>(DGK_MIN), _gk_lookup_full)
+const σ_keep = findall(v -> SIGMA_MIN <= v <= SIGMA_MAX, _σ_lookup_full)
 const δ_lookup = _δ_lookup_full[δ_keep]
 const gk_lookup = _gk_lookup_full[gk_keep]
+const σ_lookup = _σ_lookup_full[σ_keep]
 const A_grid = _A_dg_full[δ_keep, gk_keep]   # dg plane (δ × Δg_K)
 const B_grid = _B_dg_full[δ_keep, gk_keep]
-const A_ds = _A_ds_full[δ_keep, :]           # ds plane (δ × σ_ee)
-const B_ds = _B_ds_full[δ_keep, :]
-const A_gs = _A_gs_full[gk_keep, :]          # gs plane (Δg_K × σ_ee)
-const B_gs = _B_gs_full[gk_keep, :]
+const A_ds = _A_ds_full[δ_keep, σ_keep]      # ds plane (δ × σ_ee)
+const B_ds = _B_ds_full[δ_keep, σ_keep]
+const A_gs = _A_gs_full[gk_keep, σ_keep]     # gs plane (Δg_K × σ_ee)
+const B_gs = _B_gs_full[gk_keep, σ_keep]
 
 # Coarse-grain for display: average each COARSEN×COARSEN block of cells into one
 # pixel (NaN-aware). Only the heatmaps are coarsened; the mean-direction arrows
@@ -243,15 +246,15 @@ const B_gs_coarse = Base.invokelatest(block_average, B_gs, COARSEN)
 # displacement F(param_max) − F(param_min), averaged over the other parameter
 # to marginalise out the operating point.
 #
-# Arrows span the upper region of each axis: δ > 4, Δg_K > 0.002 and σ_ee ≥ σ_ee₀.
+# Arrows span the upper region of each axis: δ > 4, Δg_K > 0.002 and σ_ee ∈ [SIGMA_MIN, SIGMA_MAX].
 # (The swept Δg_K axis only reaches 0.005, so "> 0.02" is read on-grid as > 0.002.)
 #
 #   δ    arrow: δ swept 4 → 5,            averaged over Δg_K ∈ [0.002, 0.005]  (dg plane)
 #   Δg_K arrow: Δg_K swept 0.002 → 0.005, averaged over δ ∈ [4, 5]             (dg plane)
-#   σ_ee arrow: σ_ee swept σ_ee₀ → max,   averaged over δ ∈ [4, 5]             (ds plane)
+#   σ_ee arrow: σ_ee swept SIGMA_MIN → SIGMA_MAX, averaged over δ ∈ [4, 5]      (ds plane)
 const δ_arrow_range = (4.0, maximum(δ_lookup))
 const gk_arrow_range = (0.002, maximum(gk_lookup))
-const sigma_arrow_range = (sigma_ee_0, maximum(σ_lookup))
+const sigma_arrow_range = (SIGMA_MIN, SIGMA_MAX)
 
 "Nearest grid index to a target value in a lookup vector."
 _nearest(lookup, v) = argmin(abs.(lookup .- v))

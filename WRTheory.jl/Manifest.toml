@@ -3134,9 +3134,9 @@ git-tree-sha1 = "ea3e54c2bdde39062abf5a9758a23735558705e1"
 uuid = "781d530d-4396-4725-bb49-402e4bee1e77"
 version = "1.4.0"
 
-[[deps.USydClusters]]
+[[deps.AcademicClusters]]
 deps = ["Dates", "Distributed", "Preferences"]
-path = "../../../USydClusters"
+path = "../../../AcademicClusters"
 uuid = "0d53aa51-fded-4285-958f-a79747f7b7b4"
 version = "1.0.0-DEV"
 
@@ -3184,7 +3184,7 @@ version = "1.28.0"
     Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
 [[deps.WRTheory]]
-deps = ["CairoMakie", "ComplexityMeasures", "DelimitedFiles", "DiffEqNoiseProcess", "Distributions", "DrWatson", "Foresight", "FractionalNeuralSampling", "Hurst", "JLD2", "Logging", "Makie", "MittagLeffler", "MoreMaps", "Optim", "ProgressLogging", "SpecialFunctions", "StableDistributions", "StatsBase", "StochasticDiffEq", "Suppressor", "TerminalLoggers", "TimeseriesBase", "TimeseriesMakie", "TimeseriesTools", "USydClusters", "Unitful"]
+deps = ["CairoMakie", "ComplexityMeasures", "DelimitedFiles", "DiffEqNoiseProcess", "Distributions", "DrWatson", "Foresight", "FractionalNeuralSampling", "Hurst", "JLD2", "Logging", "Makie", "MittagLeffler", "MoreMaps", "Optim", "ProgressLogging", "SpecialFunctions", "StableDistributions", "StatsBase", "StochasticDiffEq", "Suppressor", "TerminalLoggers", "TimeseriesBase", "TimeseriesMakie", "TimeseriesTools", "AcademicClusters", "Unitful"]
 path = "."
 uuid = "8e081d7b-eb6b-409e-83e1-e18f77bd210e"
 version = "1.0.0-DEV"
