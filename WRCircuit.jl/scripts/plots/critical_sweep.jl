@@ -39,13 +39,8 @@ WRCircuit.@preamble
 # ──────────────────────────────────────────────────────────────────────────────
 try
     begin # * Add procs and load code everywhere
-        # USydClusters.Physics.addprocs(
-        #     28; ncpus = 1, mem = "8GB", walltime = "23:00:00",
-        #     queue = `taiji`
-        # )
-        USydClusters.Physics.addprocs(16; ncpus = 1, mem = "8GB", walltime = "23:00:00")
-        addprocs(16) # Local
-
+        USydClusters.Physics.distributeprocs(Inf; mem = "8GB", ncpus = 1)
+        666
         @everywhere begin
             using WRCircuit
             @info "WRCircuit loaded on worker $(myid())"

@@ -18,36 +18,27 @@ WRCircuit.@preamble
 set_theme!(Fathom.fathom(:physics))
 
 begin
-    x = load(datadir("critical_demo.jld2"), "x")
-    fixed_params = load(datadir("critical_demo.jld2"), "fixed_params")
-    epositions = load(datadir("critical_demo.jld2"), "epositions")
-    ipositions = load(datadir("critical_demo.jld2"), "ipositions")
+    @info "Loading data"
+    rawfile = datadir("critical_demo.jld2")   # now holds only the last 5 s of raw traces + scalars
+    fixed_params = load(rawfile, "fixed_params")
+    epositions = load(rawfile, "epositions")
+    ipositions = load(rawfile, "ipositions")
+    N = load(rawfile, "N")              # grid side (√nE); the raw arrays are subsampled in time, not space
+    mn = load(rawfile, "mean_V")        # mean membrane potential (mV), over the full trace
+    nu = load(rawfile, "nu")            # E firing rate (Hz), over the full trace
     dx = fixed_params.dx
-    spikes = x[Population = At(:E), Var = At(:spike)]
+    spikes = load(rawfile, "E_spike")   # E spike raster (last 5 s)
+    ispikes = load(rawfile, "I_spike")  # I spike raster (last 5 s)
     tmin = minimum(times(spikes)) .- step(spikes)
     tmax = maximum(times(spikes))
 end
-
-# begin # * Animate
-#     @info "Animating rates"
-#     rates = WRCircuit.compute_rates(spikes, 50u"ms")
-#     WRCircuit.animate_rates(rates, dx; filename = "critical_demo.mp4")
-# end
 
 begin
     spike_times = map(eachslice(spikes, dims = Neuron)) do s
         sts = times(s)[findall(s)]
     end
-
-    # epositions = m.E.positions
-    # epositions = map(epositions) do pos
-    #     map(pos) do p
-    #         p.tolist() |> convert2(Float32)
-    #     end
-    # end
 end
-if :I ∈ lookup(x, Population)  # * Spike raster
-    ispikes = x[Population = At(:I), Var = At(:spike)]
+begin  # * Spike raster (E + I)
     ispike_times = map(eachslice(ispikes, dims = Neuron)) do s
         sts = times(s)[findall(s)]
     end
@@ -75,11 +66,12 @@ if :I ∈ lookup(x, Population)  # * Spike raster
     ilocal_idxs = findall(imask)
 
     f = OnePanel()
-    ax = Axis(f[1, 1]; ylabel = "Excitatory", yticks = [NaN])
+    ax = Axis(f[1, 1]; ylabel = "Excitatory")
     hidexdecorations!(ax)
+    hideydecorations!(ax; label = false)
 
-    # intrvl = 5000u"ms" .. 5200u"ms"
-    intrvl = 9000u"ms" .. 9500u"ms"
+    # A 500 ms window inside the saved last-5s slice (the old 9 s mark is no longer on disk).
+    intrvl = (tmin + 2u"s") .. (tmin + 2.5u"s")
 
     for (i, s) in enumerate(spike_times[elocal_idxs])
         idxs = s .∈ [intrvl]
@@ -90,7 +82,8 @@ if :I ∈ lookup(x, Population)  # * Spike raster
         )
     end
 
-    ax2 = Axis(f[2, 1]; xlabel = "Time (ms)", ylabel = "Inhibitory", yticks = [NaN])
+    ax2 = Axis(f[2, 1]; xlabel = "Time (ms)", ylabel = "Inhibitory")
+    hideydecorations!(ax2; label = false)
     for (i, s) in enumerate(spike_times[ilocal_idxs])
         idxs = s .∈ [intrvl]
         scatter!(
@@ -105,341 +98,48 @@ if :I ∈ lookup(x, Population)  # * Spike raster
     save(plotdir("spike_example.pdf"), f)
 end
 
-begin # * Fano factor
-    @info "Calculating Fano factor"
-    dt = step(spikes)
-    τs = logrange(dt * 10 |> ustrip, dt * 1000 |> ustrip, length = 200) # ms
-    fano = fano_factor(ustripall(spikes), τs)
-    # fano = fano[𝑡 = 1..1000]
 
-    mfano = map(Chart(ProgressLogger(), Threaded()), eachcol(fano)) do x
-        ma = fit(MAPPLE, x; components = 3, peaks = 0)
-        fit!(ma, x)
-        return ma.params.components.β |> maximum
-    end
+begin # * Load precomputed statistics (computed in scripts/plots/critical_demo.jl)
+    statsfile = datadir("critical_demo_stats.jld2")
+    fano = load(statsfile, "fano")
+    mfano = load(statsfile, "mfano")
+    spectra = load(statsfile, "spectra")
+    mads = load(statsfile, "mads")
+    spectrum_fit = load(statsfile, "spectrum_fit")
+    spectrum_fits = load(statsfile, "spectrum_fits")
+    mad_fit = load(statsfile, "mad_fit")
+    mad_fits = load(statsfile, "mad_fits")
+    αs = load(statsfile, "αs")
+    βs = load(statsfile, "βs")
+    μs = load(statsfile, "μs")
+    σs = load(statsfile, "σs")
+    V_hist = load(statsfile, "V_hist")     # precomputed membrane-potential density
+    dI_hist = load(statsfile, "dI_hist")   # precomputed |ΔI| step-size density
+end
+
+begin # * Fano factor statistics
     open(plotdir("critical_demo", "fano_statistics.txt"), "w") do f
         stat = TimeseriesTools.bootstrapmedian(mfano)
         write(f, "$(stat)\n")
     end
 end
 
-# begin # * Membrane potential
-#     V = x[Population = At(:E), Var = At(:V)][1:10:end, :]
-#     V = set(V, 𝑡 => uconvert.(u"s", times(V)))
-#     V = rectify(V, dims = 𝑡)
-#     lines(V[1:2000, 970]) |> display
-# end
-# begin # * Mean each V, zero out the 10ms around each spike
-#     V = x[Population = At(:E), Var = At(:V)]
-#     V = deepcopy(V[1:10:end, :])
-#     V = set(V, 𝑡 => uconvert.(u"s", times(V)))
-#     V = rectify(V, dims = 𝑡)
-#     V̂ = V .- mean(V, dims = 𝑡)
-#     map(eachslice(V̂, dims = Neuron), eachslice(spikes, dims = Neuron)) do v, s
-#         sidxs = times(s[s])
-#         ints = map(sidxs) do t
-#             (t - 10u"ms") .. (t + 10u"ms")
-#         end
-#         for int in ints
-#             v[𝑡 = int] .= 0.0
-#         end
-#     end
-# end
-# begin # * Average unit spectrum
-#     _s = spectrum(V̂)
-#     s = median(_s, dims = Neuron)
-#     s = ustripall(dropdims(s, dims = Neuron))[𝑓 = 2 .. 100]
-#     # s = _s[2:end, 2000] |> ustripall
 
-#     ls = WRCircuit.log10spectrum(s)
-#     params = fit_oneoneff(ls; n_peaks = 2, w = 10)
-#     params = fit_oneoneff(ls, params)
-
-#     f = Figure()
-#     ax = Axis(f[1, 1]; xlabel = "Log frequency", ylabel
-#               = "Log power", title = "MUA spectrum with fit")
-#     lines!(ax, ls; color = :blue)
-#     lines!(ax, lookup(ls, 1), oneoneff(lookup(ls, 1), params); color = bermejo)
-#     display(f)
-# end
-# begin # * Mean membrane potential in a local patch
-#     idxs = [1:10, 1:10]
-#     N = lookup(V, Neuron) |> length |> sqrt |> Int
-#     localV = reshape(V, (size(V, 1), N, N))
-#     localV = localV[:, idxs...]
-#     localV = mean(localV, dims = (2, 3))
-#     localV = ToolsArray(vec(localV), dims(V, 𝑡))
-#     lines(localV[1:5000]) |> display
-#     hist(localV, bins = 200) |> display
-# end
-
-# begin # * Spectrum of local membrane potential mean
-#     V = x[Population = At(:E), Var = At(:V)]
-#     V = set(V, 𝑡 => convert2(u"s", times(V)))
-#     N = lookup(V, Neuron) |> length |> sqrt |> Int
-#     _V = reshape(V, (size(V, 1), N, N))
-
-#     block_size = 10
-#     num_row_blocks = div(size(_V, 2), block_size)
-#     num_col_blocks = div(size(_V, 3), block_size)
-
-#     idxs = [((i * block_size + 1):((i + 1) * block_size),
-#              (j * block_size + 1):((j + 1) * block_size))
-#             for i in 0:(num_row_blocks - 1), j in 0:(num_col_blocks - 1)]
-
-#     LFP = map(idxs) do (i, j)
-#         m = _V[:, i, j] # * Get local patch
-#         m = mean(m, dims = (2, 3))
-#         m = ToolsArray(vec(m), dims(V, 𝑡))
-#     end
-#     LFP = ToolsArray(LFP[:], Obs(1:length(LFP))) |> stack
-#     sLFP = spectrum(LFP .- mean(LFP, dims = 𝑡), 0.5u"s")
-
-#     s = mean(sLFP, dims = Obs) |> ustripall
-#     s = dropdims(s, dims = Obs)[𝑓 = 0.5 .. 10000]
-#     lines(s; axis = (; xscale = log10, yscale = log10)) |>
-#     display
-# end
-
-# begin # * Mean spectrum fit
-#     ls = logsample(s[3:end])
-#     params = fit_oneoneff(ls; n_peaks = 2, w = 2)
-#     params = fit_oneoneff(ls, params)
-
-#     f = Figure()
-#     ax = Axis(f[1, 1]; xlabel = "Frequency (Hz)", ylabel
-#               = "Power", title = "MUA spectrum with fit")
-#     lines!(ax, ls; color = :blue)
-#     lines!(ax, lookup(ls, 1), oneoneff(lookup(ls, 1), params); color = bermejo),
-#     display(f)
-# end
-
-# begin # * MUA spectrum
-#     mdt = 2.0u"ms"
-#     mua = groupby(spikes, 𝑡 => Base.Fix2(WRCircuit.group_dt, mdt))
-#     mua = map(mua) do r
-#         dropdims(sum(r, dims = 𝑡), dims = 𝑡) ./ uconvert(u"s", mdt)
-#     end |> stack
-#     mua = permutedims(mua, (𝑡, Neuron))
-#     mua = rectify(mua, dims = 𝑡)
-#     N = lookup(mua, Neuron) |> length |> sqrt |> Int
-#     ts = dims(mua, 𝑡)
-#     mua = reshape(mua, (size(mua, 1), N, N))
-
-#     # Calculate number of complete blocks that fit in each dimension
-#     block_size = 10
-#     num_row_blocks = div(size(mua, 2), block_size)
-#     num_col_blocks = div(size(mua, 3), block_size)
-
-#     idxs = [((i * block_size + 1):((i + 1) * block_size),
-#              (j * block_size + 1):((j + 1) * block_size))
-#             for i in 0:(num_row_blocks - 1), j in 0:(num_col_blocks - 1)]
-
-#     muas = map(idxs) do (i, j)
-#         m = mua[:, i, j] # * Get local patch
-#         m = mean(m, dims = (2, 3))
-#         m = ToolsArray(vec(m), ts)
-#         m = set(m, 𝑡 => uconvert.(u"s", times(m)))
-#         m = rectify(m, dims = 𝑡)
-#         return spectrum(m)
-#     end
-
-#     muas = mean(muas)
-#     lines(ustripall(muas)[𝑓 = 1 .. 200]; axis = (; xscale = log10, yscale = log10)) |>
-#     display
-# end
-# begin # * Plot inter-spike interval distributions
-#     isis = map(spike_times) do sts
-#         diff(sts)
-#     end
-#     f = Figure()
-#     ax = Axis(f[1, 1]; xlabel = "Inter-spike interval (ms)",
-#               ylabel = "Density", limits = ((0, 100), nothing))
-#     hist!(ax, Iterators.flatten(isis) |> collect |> ustrip, normalization = :pdf,
-#           bins = range(0.0, 1000, step = 5))
-#     display(f)
-# end
-
-# begin # * Input trace
-#     input = x[Population = At(:E), Var = At(:input)][:, 900]
-#     input = set(input, 𝑡 => uconvert.(u"s", times(input)))
-#     input = rectify(input, dims = 𝑡)
-#     lines(input[1:9000]) |> display
-# end
-# begin # * Input distribution
-#     input = x[Population = At(:E), Var = At(:input)]
-#     input = log10.(input[input .> 0.1])
-#     hist(input[:], bins = 100, axis = (; yscale = log10))
-# end
-# begin # * Input spectrum
-#     input = x[Population = At(:E), Var = At(:input)]
-#     input = set(input, 𝑡 => uconvert.(u"s", times(input)))
-#     input = rectify(input, dims = 𝑡)
-#     _s = spectrum(input .- mean(input, dims = 𝑡), 0.5)
-#     s = mean(_s, dims = Neuron)
-#     s = ustripall(dropdims(s, dims = Neuron))[𝑓 = 0.1 .. 200]
-#     lines(s; axis = (; xscale = log10, yscale = log10)) |> display
-# end
-# begin # * MSD of inputs
-#     input = x[Population = At(:E), Var = At(:input)]
-#     msd = msdist(input, 1:100)
-#     msd = mean(msd, dims = Neuron) |> ustripall
-#     msd = dropdims(msd, dims = Neuron)
-#     lines(msd, axis = (; xscale = log10, yscale = log10)) |> display
-# end
-
-# begin # * Increments of voltage
-#     dV = diff(V, dims = 𝑡)
-#     dV[dV .< 10] .= NaN
-#     lines(dV[1:1000, 1])
-# end
-
-begin # * Plot the MSD and power spectrum, with fits, of the LFP, membrane potential, and input traces
-    begin # * Membrane potential
-        V = x[Population = At(:E), Var = At(:V)]
-        V = set(V, 𝑡 => convert2(u"s", times(V)))
-    end
-    begin # * LFP
-        N = lookup(V, Neuron) |> length |> sqrt |> Int
-        _V = reshape(V, (size(V, 1), N, N))
-
-        block_size = 10
-        num_row_blocks = div(size(_V, 2), block_size)
-        num_col_blocks = div(size(_V, 3), block_size)
-
-        idxs = [
-            (
-                    (i * block_size + 1):((i + 1) * block_size),
-                    (j * block_size + 1):((j + 1) * block_size),
-                )
-                for i in 0:(num_row_blocks - 1), j in 0:(num_col_blocks - 1)
-        ]
-
-        LFP = map(idxs) do (i, j)
-            m = _V[:, i, j] # * Get local patch
-            m = mean(m, dims = (2, 3))
-            m = ToolsArray(vec(m), dims(V, 𝑡))
-        end
-        LFP = ToolsArray(LFP[:], Obs(1:length(LFP))) |> stack
-    end
-    begin # * Inputs
-        input = x[Population = At(:E), Var = At(:input)]
-        input = set(input, 𝑡 => convert2(u"s", times(V)))
-    end
+begin # * Membrane potential and input traces (last 5 s), for the trace/trajectory panels
+    V = load(rawfile, "E_V")
+    V = set(V, 𝑡 => convert2(u"s", times(V)))
+    input = load(rawfile, "E_input")
+    input = set(input, 𝑡 => convert2(u"s", times(input)))
+    # LFP is not rebuilt here (its spectra/MAD are precomputed in the stats file); the stats-plot loops
+    # below index the loaded NamedTuples by their keys directly (keys(spectra) = V/LFP/input).
 end
 
-begin # * Fit distribution
-    ds = map(Chart(Threaded()), eachslice(input[1:10:end, :], dims = Neuron)) do v
-        fit(Stable, v)
-    end
-    αs = getfield.(ds, :α)
-    βs = getfield.(ds, :β)
-    μs = getfield.(ds, :μ)
-    σs = getfield.(ds, :σ)
-end
-
-# * Fit mean spectrum/mad
-function fit_spectrum(s; components, peaks, f_range)
-    negdims = [i for i in 1:ndims(s) if i != dimnum(s, 𝑓)] |> Tuple
-    original_s = deepcopy(s)
-    original_s = ustripall(original_s)
-    original_s = median(original_s, dims = negdims)
-    original_s = dropdims(original_s, dims = negdims)
-
-    s = s[𝑓 = f_range] |> ustripall
-    s = median(s, dims = negdims)
-    s = dropdims(s, dims = negdims)
-    _s = logsample(s)
-    m = fit(MAPPLE, _s; components, peaks)
-    fit!(m, _s)
-    fitted_s = predict(m, s)
-    return (; m, s = original_s, fitted_s, _s)
-end
-function fit_mad(s; components, peaks, tau_range)
-    negdims = [i for i in 1:ndims(s) if i != dimnum(s, 𝑡)] |> Tuple
-    s = s[𝑡 = tau_range] |> ustripall
-    s = median(s, dims = negdims)
-    s = dropdims(s, dims = negdims)
-    # _s = logsample(s)
-    m = fit(MAPPLE, s; components, peaks)
-    fit!(m, s)
-    fitted_s = predict(m, s)
-    return (; m, s, fitted_s)
-end
-
-# * Fit each spectrum individually
-function fit_spectrums(s::AbstractVector; components, peaks, f_range)
-    s = s[𝑓 = f_range] |> ustripall
-    # s = mean(s, dims = negdims)
-    # s = dropdims(s, dims = negdims)
-    _s = logsample(s)
-    m = fit(MAPPLE, _s; components, peaks)
-    fit!(m, _s)
-    fitted_s = predict(m, s)
-    return (; m, s, fitted_s, _s)
-end
-function fit_spectrums(s::AbstractMatrix; kwargs...)
-    return map(eachcol(s)) do v
-        fit_spectrums(v; kwargs...)
-    end
-end
-function fit_mads(s::AbstractVector; components, peaks, tau_range)
-    s = s[𝑡 = tau_range] |> ustripall
-    # s = mean(s, dims = negdims)
-    # s = dropdims(s, dims = negdims)
-    # _s = logsample(s)
-    m = fit(MAPPLE, s; components, peaks)
-    fit!(m, s)
-    fitted_s = predict(m, s)
-    return (; m, s, fitted_s)
-end
-function fit_mads(s::AbstractMatrix; kwargs...)
-    return map(eachcol(s)) do v
-        try
-            fit_mads(v; kwargs...)
-        catch
-            return NaN
-        end
-    end
-end
-
-begin # * Calculate spectra and MAD
-    vars = (; V = V[:, 1:10:end], LFP = LFP[:, 1:10:end], input = input[:, 1:10:end])
-
-    @info "Calculating spectra"
-    spectra = map(Chart(Threaded()), vars) do v
-        spectrum(v .- mean(v, dims = 𝑡), 1.0u"Hz", padding = 5000)
-    end
-    @info "Calculating MADs"
-    mads = map(Chart(Threaded()), vars) do v
-        madev(v, round.(Int, logrange(10, 10000, length = 100) |> unique) .* step(v))
-    end
-end
-
-begin # * Fits
-    f_range = 10u"Hz" .. 1000u"Hz"
-    tau_range = 0u"s" .. 1u"s"
-    @info "Fitting spectra"
-    spectrum_fit = map(Chart(Threaded(), ProgressLogger()), spectra) do s
-        fit_spectrum(s; components = 1, peaks = 0, f_range)
-    end
-    spectrum_fits = map(Chart(Threaded(), ProgressLogger()), spectra) do s
-        fit_spectrums(s; components = 1, peaks = 0, f_range)
-    end
-    @info "Fitting MADs"
-    mad_fit = map(Chart(Threaded(), ProgressLogger()), mads) do m
-        fit_mad(m; components = 2, peaks = 0, tau_range)
-    end
-    mad_fits = map(Chart(Threaded(), ProgressLogger()), mads) do m
-        fit_mads(m; components = 2, peaks = 0, tau_range)
-    end
-end
 
 if false
     f = SixPanel()
     gs = permutedims(subdivide(f, 3, 2), (2, 1))
 
-    axs = map(enumerate(keys(vars))) do (i, v)
+    axs = map(enumerate(keys(spectra))) do (i, v)
         s = fit_spectra[v].s
         _s = fit_spectra[v]._s
         fitted_s = fit_spectra[v].fitted_s
@@ -462,7 +162,7 @@ if false
     end
     # linkaxes!(axs...)
 
-    axs = map(enumerate(keys(vars))) do (i, v)
+    axs = map(enumerate(keys(spectra))) do (i, v)
         s = fit_mads[v].s
         _s = s #fit_mads[v]._s
         fitted_s = fit_mads[v].fitted_s
@@ -490,7 +190,7 @@ end
 begin # * Individual statistics
     # * Spectrum
     fs = [OnePanel() for _ in 1:3]
-    axs = map(fs, keys(vars)) do f, v
+    axs = map(fs, keys(spectra)) do f, v
         s = spectra[v] |> ustripall
         s = median(s, dims = 2)
         s = dropdims(s, dims = 2)
@@ -513,12 +213,12 @@ begin # * Individual statistics
             ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
             align = (:left, :bottom)
         )
-        wsave(plotdir("critical_demo", "$(v)_spectrum.pdf"), f)
+        wsave(plotdir("critical_demo", "$(v)_spectrum.svg"), f)
     end
 
     # * MAD
     fs = [OnePanel() for _ in 1:3]
-    axs = map(fs, keys(vars)) do f, v
+    axs = map(fs, keys(spectra)) do f, v
         s = mads[v] |> ustripall
         s = median(s, dims = 2)
         s = dropdims(s, dims = 2)
@@ -539,13 +239,14 @@ begin # * Individual statistics
             ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
             align = (:left, :bottom)
         )
-        wsave(plotdir("critical_demo", "$(v)_mad.pdf"), f)
+        wsave(plotdir("critical_demo", "$(v)_mad.svg"), f)
     end
 end
 
+
 begin # * Statistics
     open(plotdir("critical_demo", "statistics.txt"), "w") do f
-        for v in keys(vars)
+        for v in keys(spectra)
             println(f, "\n=== Variable: $(v) ===")
             println(f, "-- Spectrum fit --")
             m = map(spectrum_fits[v]) do x
@@ -647,13 +348,36 @@ begin # * Supplementary figure: distribution of input distribution parameters
     wsave(plotdir("critical_demo", "input_distribution_parameters.pdf"), sf)
 end
 
+# Render a precomputed density histogram `h` (a `histcounts` ToolsArray: bin centre -> density) in the
+# Fathom `ziggurat` style: filled translucent bars with a step outline over the top. On a log axis pass
+# `logy = true` to drop the leftmost bin (its left edge is 0) and mask nonpositive heights.
+function zigg!(ax, h; color = baikal, logy = false, dropfirst = logy)
+    centers = collect(lookup(h, 1))
+    pdf = collect(h)
+    w = centers[2] - centers[1]
+    edges = [centers .- w / 2; centers[end] + w / 2]
+    e = dropfirst ? edges[2:end] : edges
+    c = dropfirst ? centers[2:end] : centers
+    p = dropfirst ? pdf[2:end] : pdf
+    if dropfirst                       # renormalise to unit area over the shown bins (matches the old bins[2:end])
+        s = sum(p) * w
+        s > 0 && (p = p ./ s)
+    end
+    barplot!(ax, c, p; width = w, gap = 0, color = (color, 0.5), strokewidth = 0)
+    ys = Float64.([p; last(p)])
+    logy && (ys[ys .<= 0] .= NaN)
+    stairs!(ax, e, ys; step = :post, color = color)
+end
+
 begin # * Additional properties: image and distribution fit
     mf = TwoPanel(; size = (720, 324))
     myna = 27
-    t = 18.3 * 10000 |> Int # Samples
+    # Sample indices INTO the saved last-5s window (50 000 samples at dt = 0.1 ms). The old absolute
+    # marks (18.3 s, 1.35-1.85 s) are no longer on disk, so pick a COM window and a trace window inside it.
+    t = 3.0 * 10000 |> Int # Samples (3 s into the window)
     deltat = 0.117 * 10000 |> round |> Int # Samples
     shift = (-10, 5)
-    input_ts = 13500:18500 # 8000:13000
+    input_ts = 5000:10000 # 0.5-1.0 s into the window
 
     g = mf[1, 1:2] = GridLayout()
     gg = g[1, 2] = GridLayout()
@@ -713,9 +437,12 @@ begin # * Additional properties: image and distribution fit
 
     input_grid = reshape(input, (size(input, 1), N, N))
 
-    input_grid = circshift(input_grid, (0, shift...)) # Avoid wraparounds
+    # Shift only the window we use (cosmetic re-centring to dodge torus
+    # wraparound), not the whole multi-GB trace.
+    window = circshift(input_grid[(t - deltat):t, :, :], (0, shift...))
+    frame = window[end, :, :] # last window frame == shifted input_grid[t]
 
-    xs, ys = track_com(input_grid[(t - deltat):t, :, :])
+    xs, ys = track_com(window)
     xs = xs[1:3:end]
     ys = ys[1:3:end]
     color = (0:deltat)[1:3:end] ./ 1000
@@ -732,7 +459,7 @@ begin # * Additional properties: image and distribution fit
     )
 
     h = heatmap!(
-        ax, xx, xx, input_grid[t, :, :]';
+        ax, xx, xx, frame';
         colormap = seethrough(reverse(sunrise))
     )
     lines!(ax, xs, ys; color = :white, linewidth = 3)
@@ -867,14 +594,12 @@ begin # * Additional properties: image and distribution fit
         )
         hlines!(axv1, [-50]; color = bermejo)
         hlines!(axv1, [-70]; color = bermejo, linestyle = :dash)
-        mn = mean(V[1:50:end, :])
-        hlines!(axv1, [mn]; color = :gray, linestyle = :dash)
+        hlines!(axv1, [mn]; color = :gray, linestyle = :dash)   # mn: mean V over the full trace (loaded)
         y = V[input_ts, myna] |> ustripall
         ts = times(y) .- times(y)[1]
         lines!(axv1, ts, y, linewidth = 3)
 
-        nu = sum(spikes) ./ size(spikes, 2) ./ uconvert(u"s", duration(spikes)) |> ustrip
-
+        # nu: E firing rate over the full trace (loaded from the raw file)
         axislegend(
             axv1, [LineElement(color = :transparent, linestyle = nothing)],
             [L"\nu \approx %$(round(nu, digits=1)) \textrm{ Hz }"];
@@ -905,13 +630,9 @@ begin # * Additional properties: image and distribution fit
         # hideydecorations!(axv2)
         # hidexdecorations!(axv2)
 
-        v = V[1:10:end]
-        bins = -70:0.1:-50
-        bins = bins[2:end]
-        ziggurat!(
-            axv2, v; bins, normalization = :pdf,
-            color = baikal
-        )
+        # Precomputed membrane-potential density (over the full trace, saved in the stats file).
+        # Drop the first bin: it is the Vr = -70 mV reset/refractory pile-up (the old plot's bins[2:end]).
+        zigg!(axv2, V_hist; dropfirst = true)
         vlines!(axv2, [mn]; color = :gray, linestyle = :dash)
     end
     begin # * step size distribution
@@ -924,14 +645,8 @@ begin # * Additional properties: image and distribution fit
         # hideydecorations!(axvi2)
         # hidexdecorations!(axvi2)
 
-        vi = abs.(diff(input, dims = 1))
-
-        bins = 0:0.1:4
-        bins = bins[2:end]
-        ziggurat!(
-            axvi2, vi[1:10:end]; bins, normalization = :pdf,
-            color = baikal
-        )
+        # Precomputed |ΔI| step-size density (over the full trace, saved in the stats file).
+        zigg!(axvi2, dI_hist; logy = true)
         # hlines!(ax, [mean(V)]; color = :gray, linestyle = :dash)
 
         # rowsize!(mf.layout, 0, Relative(0.2))

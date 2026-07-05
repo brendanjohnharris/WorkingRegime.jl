@@ -1,3 +1,8 @@
+name = "WorkingRegime"
+uuid = "a2fb53ce-e249-4e8c-8865-d217552c1552"
+version = "1.0.0-DEV"
+authors = ["brendanjohnharris <bhar9988@uni.sydney.edu.au> and contributors"]
+
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"

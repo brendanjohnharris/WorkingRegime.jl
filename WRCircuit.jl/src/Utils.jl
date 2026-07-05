@@ -269,13 +269,15 @@ end
 """
     spectral_exponents(psd; step = 1)
 
-Per-neuron spectral exponents: the last component of a 1-component MAPPLE fit to
-each neuron's 10-1000 Hz power spectral density (PSD). One value per fitted neuron.
+Per-neuron spectral exponents: the aperiodic exponent (the single component) of a
+1-component, 1-peak MAPPLE fit to each neuron's 10-1000 Hz power spectral density
+(PSD). The Gaussian peak absorbs the ~50 Hz oscillation so it does not bias the
+aperiodic slope. One value per fitted neuron.
 """
 function spectral_exponents(psd; step = 1)
     return per_neuron(psd; step) do col
         p = logsample(ustripall(col[𝑓 = 10u"Hz" .. 1000u"Hz"]))
-        m = fit(MAPPLE, p; components = 1, peaks = 0)
+        m = fit(MAPPLE, p; components = 1, peaks = 1)
         fit!(m, p)
         last(m.params.components.β)
     end

@@ -3,12 +3,6 @@
 #=
 exec julia +1.12 --handle-signals=yes -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-# Critical sweep --- the working-regime phase diagram over (delta, Delta_g_K, sigma_ee), now run on the native
-# Dewdrop (N,B) BATCHED ensemble (no JAX/BrainPy). Factoring: the connectome-changing axes (random `seed` and
-# `sigma_ee`) become OUTER jobs --- one connectome each --- while the weight/param axes (`delta`, `Delta_g_K`)
-# become the BATCH columns, co-executed over that shared connectome by `simulate_batch`. The 5 random seeds are
-# the 'Obs' dimension stamped onto every saved result (plumbed into downstream scripts later). Set the env var
-# `WRCIRCUIT_SMOKE` for a tiny end-to-end run.
 using DrWatson
 DrWatson.@quickactivate :WRCircuit
 using WRCircuit
@@ -17,33 +11,31 @@ using MoreMaps
 using Statistics
 WRCircuit.@preamble
 
-const SMOKE = haskey(ENV, "WRCIRCUIT_SMOKE")   # tiny config for a quick end-to-end validation
-
 begin # * Sweep configuration
-    # B = batch chunk size (members co-executed per `solve`). All saved statistics (MAD, PSD, rate, Fano) are
-    # reduced ON-DEVICE by streaming monitors --- no trace or raster is stored --- so host memory no longer
-    # scales with `nsteps`; B is now bounded only by the connectome + per-member reducer state (small).
-    B = SMOKE ? 2 : 32
-    seeds = SMOKE ? (1:1) : (1:5)              # connectome realizations → the 'Obs' (integer seed) dimension
-    model_kwargs = SMOKE ? (; rho = 400, dx = 0.6, nu = 30.0, n_ext = 60) : (;)   # shrink the net under SMOKE
+    B = 32
+    seeds = 1:3                                # connectome realizations → the 'Obs' (integer seed) dimension
     arch = WRCircuit.DEWDROP_BACKEND()         # CPU by default; `Dewdrop.GPU()` fills the GPU with the batch
-    path = SMOKE ? joinpath(tempdir(), "wrcircuit_sweep_smoke") : datadir("critical_sweep")
-end
+    path = datadir("critical_sweep")
 
-begin # * Fixed run parameters
     defaults = WRCircuit.defaults(WRCircuit.models.Spatial)
-    tmax = SMOKE ? 200u"ms" : 35u"s"
-    transient = SMOKE ? 50u"ms" : 5u"s"        # discarded transient; simulations always begin at 0
+    tmax = 35u"s"
+    transient = 5u"s"                          # discarded transient; simulations always begin at 0
     dt = 0.1u"ms"
     dt_ms = ustrip(u"ms", dt)
     transient_ms = ustrip(u"ms", transient)
+
+    const mad_lags = unique(round.(Int, logrange(10, 10000, length = 100)))
+    const τs = mad_lags .* dt
+    const psd_fmin = (1 / dt_ms) / 8192   # nfft = 8192 (power of 2 → small cuFFT workspace; nfft=10000 OOMs from its 5^4 radix). ~1.2 Hz, ~40 log bins in 10-1000 Hz after logsample. Was 0.25 = 250 Hz → only 4 bins → spurious ~-4 exponent.
+    const fano_taus = collect(logrange(dt_ms * 10, dt_ms * 1000, length = 200))
+    const transient_steps = round(Int, transient_ms / dt_ms)   # transient dropped on-device by the reductions
 end
 
 begin # * Parameter planes: three 2-D planes through the default working-regime point
-    n = SMOKE ? (3, 3, 2) : (31, 26, 19)
-    delta = round.(range(3.5, 5, length = n[1]); sigdigits = 3)
-    Delta_g_K = round.(range(0, 0.005, length = n[2]); sigdigits = 3)
-    sigma_ee = round.(range(0.03, 0.12, length = n[3]); sigdigits = 3)
+    delta = round.(range(3.5, 5, length = 31); sigdigits = 3)
+    Delta_g_K = round.(range(0, 0.005, length = 26); sigdigits = 3)
+    sigma_ee = round.(range(0.03, 0.075, length = 19); sigdigits = 3)
+
     delta_0 = round(Float64(defaults[:delta]); sigdigits = 3)
     Delta_g_K_0 = round(Float64(defaults[:Delta_g_K]); sigdigits = 3)
     sigma_ee_0 = round(Float64(defaults[:sigma_ee]); sigdigits = 3)
@@ -54,15 +46,6 @@ begin # * Parameter planes: three 2-D planes through the default working-regime 
     isdir(path) || mkpath(path)
 end
 
-# τ lags for the input MAD. The streaming MADev monitor works in integer RECORDED-SAMPLE (step) units, so we
-# pass step `mad_lags`; `τs = mad_lags .* dt` is the matching physical-time axis used to label the saved result.
-const mad_lags = unique(round.(Int, logrange(10, 10000, length = 100)))
-const τs = mad_lags .* dt
-const psd_fmin = 0.25                       # min resolved frequency for the streaming Welch PSD (≡ old spectrum(_, 0.25))
-# Fano-factor window sizes (ms), matching plot_critical_demo.jl's `logrange(dt*10, dt*1000, length=200)`.
-const fano_taus = collect(logrange(dt_ms * 10, dt_ms * 1000, length = 200))
-const transient_steps = round(Int, transient_ms / dt_ms)   # transient dropped on-device by the reductions
-
 begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B) batch over (delta, Delta_g_K)
     for seed in seeds
         model = WRCircuit.Spatial(; key = seed)
@@ -71,21 +54,20 @@ begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B
             !isfile(joinpath(path, savename((; p..., seed = seed), "jld2"; connector)))
         end
         isempty(remaining) && continue
-        for σ in unique(p.sigma_ee for p in remaining)
+        @info "Computing seed $seed/$(length(seeds))"
+        sigmas = unique(p.sigma_ee for p in remaining)
+        C = Chart(LogLogger(length(sigmas)))
+        map(C, sigmas) do σ
             combos = filter(p -> p.sigma_ee == σ, remaining)
             for chunk in Iterators.partition(combos, B)
                 deltas = [Float64(c.delta) for c in chunk]
                 dgks = [Float64(c.Delta_g_K) for c in chunk]
-                @info "seed $seed / sigma_ee $σ: batch of $(length(chunk))"
-                # All four statistics --- input MAD + PSD (from `itot`), and spike RATE + FANO --- are reduced
-                # ON-DEVICE by streaming monitors. No trace or raster is ever materialised (host or device), so
-                # host memory no longer scales with `nsteps`. `scatter = :compacted` is the advisor's pick for
-                # this sparse-firing large network (processes only active synapses; ~30× faster scatter).
+                @debug "seed $seed / sigma_ee $σ: batch of $(length(chunk))"
                 bs = simulate_batch(
                     model, tmax, deltas, dgks;
                     sigma_ee = σ, dt = dt_ms, arch = arch, progress = true, scatter = :compacted,
                     mad_lags = mad_lags, psd_fmin = psd_fmin, fano_taus = fano_taus, rate = true,
-                    transient = transient_steps, model_kwargs...
+                    transient = transient_steps,
                 )
                 NE = size(bs.record.rate.data, 1)
                 neuron_labels = Neuron(Symbol.("E" .* string.(1:NE)))
@@ -96,7 +78,16 @@ begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B
                 for (i, c) in enumerate(chunk)
                     # Rebuild the labelled (stat × Neuron) arrays from member i's on-device-reduced slice.
                     mad = ToolsArray(permutedims(bs.record.mad.data[:, i, :]), (lag_axis, neuron_labels))
-                    psd = ToolsArray(permutedims(bs.record.psd.data[:, i, :]), (freq_axis, neuron_labels))
+                    # Log-sample each neuron's fine PSD onto critical_demo's log-frequency grid (equal-width
+                    # log10 bins, geometric mean per bin): the exponent fit then sees the SAME resolution as
+                    # scripts/plots/critical_demo.jl, and the saved array stays tiny (~50 pts vs ~5000 linear bins).
+                    # ustripall first (logsample takes log10 of the frequencies), select the fit band by its
+                    # ms^-1 value (0.01-1.0 = 10-1000 Hz; a u"Hz" selector on the fresh range axis throws), then
+                    # re-attach ms^-1 units so downstream `spectral_exponents` can still select in u"Hz".
+                    psd_fine = ustripall(ToolsArray(permutedims(bs.record.psd.data[:, i, :]), (freq_axis, neuron_labels)))
+                    cols = map(c -> logsample(c[𝑓 = 0.01 .. 1.0]), eachslice(psd_fine; dims = Neuron))
+                    logf = 𝑓(collect(lookup(first(cols), 𝑓)) .* u"ms^-1")
+                    psd = ToolsArray(reduce(hcat, map(collect, cols)), (logf, neuron_labels))
                     fano = ToolsArray(permutedims(bs.record.fano.data[:, i, :]), (fano_axis, neuron_labels))
                     rate = ToolsArray(uconvert.(u"Hz", bs.record.rate.data[:, i] .* u"ms^-1"), neuron_labels)
                     parameters = (; defaults..., c..., seed = seed)   # `seed` is the Obs dimension
@@ -109,6 +100,7 @@ begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B
                 bs = nothing
                 GC.gc()
             end
+            nothing
         end
     end
     nfiles = count(endswith(".jld2"), readdir(path))

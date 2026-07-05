@@ -117,8 +117,14 @@ _monitor_spec(v::Symbol, of) = v === :spike ? Spikes(of = of) : Trace(_dwvar(v);
 # Per-(population, variable) monitors recorded only over the requested subpopulations (`of = :E`), keyed
 # `Symbol(p, :_, dwvar)` --- matches the old memory profile (records E only when `populations = [:E]`).
 _perpop_key(p::Symbol, v::Symbol) = Symbol(p, :_, v === :spike ? :spikes : _dwvar(v))
-_perpop_record(populations, vars) =
+_perpop_record(populations, vars::AbstractVector) =
     NamedTuple(_perpop_key(p, v) => _monitor_spec(v, p) for p in populations for v in vars)
+# Per-population vars: pass `vars` as a NamedTuple mapping each population to its own variable list,
+# so one run can record e.g. full traces for :E but only spikes for :I --- keeping recording memory
+# O(what you asked for) rather than O(all populations × all vars). `simulate` forwards `vars`
+# unchanged, so `simulate(m, t; populations=[:E,:I], vars=(; E=[:spike,:V,:input], I=[:spike]))` works.
+_perpop_record(populations, vars::NamedTuple) =
+    NamedTuple(_perpop_key(p, v) => _monitor_spec(v, p) for p in populations for v in vars[p])
 
 # --- Run (raw solution) -------------------------------------------------------------------------
 """

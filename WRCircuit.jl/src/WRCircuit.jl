@@ -53,14 +53,13 @@ Restore the default logger with `Logging.global_logger(Logging.ConsoleLogger())`
 """
 terminal_logging!() = (Logging.global_logger(TerminalLogger()); nothing)
 
-# Install the terminal logger on load: interactive sessions only (scripts/CI keep their own logger), and
-# never while generating compiled output (`jl_generating_output` --- so we don't mutate global logging state
-# during precompilation, of this package or anything downstream). `TerminalLogger()`'s default `min_level`
-# is `ProgressLevel` (LogLevel(-1)), matching Dewdrop's progress records, so progress bars render.
+# NOTE: the global TerminalLogger is installed from the user's startup.jl (BEFORE any package loads),
+# not here. Installing it in __init__ runs AFTER the GPU stack has loaded, so
+# `min_enabled_level(::TerminalLogger)` lands at a world age newer than the kernel-compile world ---
+# GPUCompiler introspects `global_logger()` during compilation and crashes ("method too new") on cold
+# batch runs. Registering TerminalLogger first (startup.jl) keeps that method visible at the compile
+# world. Call `terminal_logging!()` manually to opt in within a session.
 function __init__()
-    if ccall(:jl_generating_output, Cint, ()) == 0 && isinteractive()
-        terminal_logging!()
-    end
     return nothing
 end
 
