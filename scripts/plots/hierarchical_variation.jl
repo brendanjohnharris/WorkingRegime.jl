@@ -189,6 +189,13 @@ const _A_ds_full = Base.invokelatest(seed_pooled_median, circuit["a_ds"].data)
 const _B_ds_full = Base.invokelatest(seed_pooled_median, circuit["b_ds"].data)
 const _A_gs_full = Base.invokelatest(seed_pooled_median, circuit["a_gs"].data)
 const _B_gs_full = Base.invokelatest(seed_pooled_median, circuit["b_gs"].data)
+# td plane (τ_r_e × τ_d_e): the excitatory-synapse time-constant plane from the batched sweep. Plotted at
+# full 8×8 resolution --- no ROI slice or coarsening (it is already small, and the full plane shows how a
+# rises with τ_r and the fit blows up in the fast-rise/slow-decay corner).
+const _A_td_full = Base.invokelatest(seed_pooled_median, circuit["a_td"].data)
+const _B_td_full = Base.invokelatest(seed_pooled_median, circuit["b_td"].data)
+const τr_lookup = collect(circuit["tau_r_e"])
+const τd_lookup = collect(circuit["tau_d_e"])
 
 # Slice each axis to its region of interest: δ > DELTA_MIN, Δg_K > DGK_MIN and
 # σ_ee ∈ [SIGMA_MIN, SIGMA_MAX]. Each plane uses the slices of its own two axes.
@@ -221,6 +228,7 @@ function block_average(M::AbstractMatrix, b)
         block = filter(!isnan, vec(M[rows, cols]))
         out[i, j] = isempty(block) ? NaN : mean(block)
     end
+
     return out
 end
 
@@ -246,15 +254,17 @@ const B_gs_coarse = Base.invokelatest(block_average, B_gs, COARSEN)
 # displacement F(param_max) − F(param_min), averaged over the other parameter
 # to marginalise out the operating point.
 #
-# Arrows span the upper region of each axis: δ > 4, Δg_K > 0.002 and σ_ee ∈ [SIGMA_MIN, SIGMA_MAX].
-# (The swept Δg_K axis only reaches 0.005, so "> 0.02" is read on-grid as > 0.002.)
-#
-#   δ    arrow: δ swept 4 → 5,            averaged over Δg_K ∈ [0.002, 0.005]  (dg plane)
-#   Δg_K arrow: Δg_K swept 0.002 → 0.005, averaged over δ ∈ [4, 5]             (dg plane)
-#   σ_ee arrow: σ_ee swept SIGMA_MIN → SIGMA_MAX, averaged over δ ∈ [4, 5]      (ds plane)
-const δ_arrow_range = (4.0, maximum(δ_lookup))
-const gk_arrow_range = (0.002, maximum(gk_lookup))
-const sigma_arrow_range = (SIGMA_MIN, SIGMA_MAX)
+# The circuit arrows read the τ_syn (τ_r_e, τ_d_e) plane --- the excitatory synaptic time constants, the
+# knobs that actually move the exponents (δ / Δg_K / σ_ee barely do; those planes are in the supplement).
+#   τ_r arrow: τ_r_e swept over the clean low-rise band, averaged over τ_d_e   (td plane)
+#   τ_d arrow: τ_d_e swept over its full range, averaged over the low-τ_r band (td plane)
+# The fast-rise/slow-decay corner drives the 2-component MAD fit's first component past 1 (an artefact, not a
+# regime), so mask a > 1 to NaN (mean_direction skips NaN corners) and keep the τ_r sweep in the clean band.
+const _td_bad = _A_td_full .> 1
+const _A_td_arrow = ifelse.(_td_bad, NaN, _A_td_full)
+const _B_td_arrow = ifelse.(_td_bad, NaN, _B_td_full)
+const τr_arrow_range = (minimum(τr_lookup), 1.2)   # low-rise band, near the neuropixels operating point (low a)
+const τd_arrow_range = (minimum(τd_lookup), 5.5)    # low-decay band --- the scatter sits at low a ⇒ short τ_d
 
 "Nearest grid index to a target value in a lookup vector."
 _nearest(lookup, v) = argmin(abs.(lookup .- v))
@@ -289,19 +299,13 @@ function mean_direction(
     return (mean(da), mean(db))
 end
 
-const δ_dir = mean_direction(
-    A_grid, B_grid, δ_lookup, δ_arrow_range,
-    gk_lookup, gk_arrow_range; dim = 1
+const τr_dir = mean_direction(
+    _A_td_arrow, _B_td_arrow, τr_lookup, τr_arrow_range,
+    τd_lookup, τd_arrow_range; dim = 1
 )
-const gk_dir = mean_direction(
-    A_grid, B_grid, gk_lookup, gk_arrow_range,
-    δ_lookup, δ_arrow_range; dim = 2
-)
-# σ_ee direction reads the ds plane (δ × σ_ee): sweep σ_ee (its columns, dim = 2),
-# marginalising over the same upper-δ band the other two arrows use.
-const σ_dir = mean_direction(
-    A_ds, B_ds, σ_lookup, sigma_arrow_range,
-    δ_lookup, δ_arrow_range; dim = 2
+const τd_dir = mean_direction(
+    _A_td_arrow, _B_td_arrow, τd_lookup, τd_arrow_range,
+    τr_lookup, τr_arrow_range; dim = 2
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -447,17 +451,15 @@ function plot_hero!(
     arrow_len = 0.6 * span
     scaled(v) = (n = hypot(v...); n == 0 ? v : (v .* (arrow_len / n)))
 
-    # Two arrow fans, each at its own anchor so they don't overlap: the circuit
-    # (δ, Δg_K, σ_ee) triple sits left of the centroid, the bFNS theory (α, β) pair
-    # to the right. The split is a fraction of the data span. (vector, label,
-    # colour): circuit knobs in green/purple/orange, bFNS orders in red/blue.
+    # Two arrow fans, each at its own anchor so they don't overlap: the circuit τ_syn pair (τ_r, τ_d) sits
+    # left of the centroid, the bFNS theory (α, β) pair to the right. The split is a fraction of the data span.
+    # (vector, label, colour): synaptic time constants in green/orange, bFNS orders in red/blue.
     split = 0.3 * span
     pairs = (
         (
             (cx - split, cy), (
-                (scaled(δ_dir), "δ", qinghai),
-                (scaled(gk_dir), "Δg_K", ianthina),
-                (scaled(σ_dir), "σ_ee", seohae),
+                (scaled(τr_dir), "τ_r", qinghai),
+                (scaled(τd_dir), "τ_d", seohae),
             ),
         ),
         (
@@ -511,11 +513,11 @@ end
 # Figure: (a, b) scatters on top, then one heatmap row per circuit plane below
 # ──────────────────────────────────────────────────────────────────────────────
 
-f = Figure(size = (720, 1080))   # 4 rows × 2 cols at Fathom's 360×270 panel scale
+f = FourPanel()   # main figure: (a, b) scatters (top) + the τ_syn heatmaps (bottom), 2×2 at 360×270 panel scale
 
 # One sub-grid per panel; each holds [axis | colorbar] in its own columns. Row-major:
-# gs[1,2] = heroes (L2/3, L6); gs[3,4] = dg (a, b); gs[5,6] = ds (a, b); gs[7,8] = gs (a, b).
-gs = subdivide(f, 4, 2)
+# gs[1,2] = heroes (L2/3, L6); gs[3,4] = td (a, b). The δ/Δg_K/σ_ee planes move to the supplementary figure below.
+gs = subdivide(f, 2, 2)
 
 begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
     ax_l23 = Axis(
@@ -540,43 +542,24 @@ begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
 end
 
 "Draw one circuit forward-map heatmap (axis + colorbar) into sub-grid `pos`."
-function circuit_heatmap!(pos, x, y, z; xlabel, ylabel, title, clabel)
+function circuit_heatmap!(pos, x, y, z; xlabel, ylabel, title, clabel, colorrange = automatic, highclip = automatic)
     ax = Axis(pos[1, 1]; xlabel = xlabel, ylabel = ylabel, title = title)
-    p = heatmap!(ax, x, y, z; colormap = binarysunset)
+    p = heatmap!(ax, x, y, z; colormap = binarysunset, colorrange, highclip)
     Colorbar(pos[1, 2], p; label = clabel, width = 12)
     return ax
 end
 
-begin # * Circuit heatmap rows — three planes through the working-regime point, a (left) and b (right)
-    δlab = "δ  (I:E ratio)"
-    gklab = "Δg_K  (adaptation)"
-    σlab = "σ_ee  (E→E spread)"
-    # dg plane (δ × Δg_K)
+begin # * τ_syn plane heatmaps — the (τ_r_e × τ_d_e) synaptic-filter plane, a (left) and b (right)
+    τrlab = "τ_r_e  (E rise, ms)"
+    τdlab = "τ_d_e  (E decay, ms)"
     circuit_heatmap!(
-        gs[3], δ_coarse, gk_coarse, A_coarse;
-        xlabel = δlab, ylabel = gklab, title = "Circuit:  a", clabel = "a"
+        gs[3], τr_lookup, τd_lookup, _A_td_full;
+        xlabel = τrlab, ylabel = τdlab, title = "Circuit:  a", clabel = "a",
+        colorrange = (minimum(filter(isfinite, _A_td_full)), 1.0), highclip = binarysunset[end]
     )
     circuit_heatmap!(
-        gs[4], δ_coarse, gk_coarse, B_coarse;
-        xlabel = δlab, ylabel = gklab, title = "Circuit:  b", clabel = "b"
-    )
-    # ds plane (δ × σ_ee)
-    circuit_heatmap!(
-        gs[5], δ_coarse, σ_coarse, A_ds_coarse;
-        xlabel = δlab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
-    )
-    circuit_heatmap!(
-        gs[6], δ_coarse, σ_coarse, B_ds_coarse;
-        xlabel = δlab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
-    )
-    # gs plane (Δg_K × σ_ee)
-    circuit_heatmap!(
-        gs[7], gk_coarse, σ_coarse, A_gs_coarse;
-        xlabel = gklab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
-    )
-    circuit_heatmap!(
-        gs[8], gk_coarse, σ_coarse, B_gs_coarse;
-        xlabel = gklab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
+        gs[4], τr_lookup, τd_lookup, _B_td_full;
+        xlabel = τrlab, ylabel = τdlab, title = "Circuit:  b", clabel = "b"
     )
 end
 
@@ -595,3 +578,46 @@ display(f)
 outfile = joinpath(outdir, "hierarchical_variation.pdf")
 wsave(outfile, f)
 @info "Saved $outfile"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Supplementary figure: the three operating-point planes (δ, Δg_K, σ_ee) --- the knobs that barely move the
+# exponents (contrast the τ_syn plane in the main figure). One plane per row, a (left) and b (right).
+# ──────────────────────────────────────────────────────────────────────────────
+fs = SixPanel()   # 3 rows × 2 cols at 360×270 panel scale
+gss = subdivide(fs, 3, 2)
+begin
+    δlab = "δ  (I:E ratio)"
+    gklab = "Δg_K  (adaptation)"
+    σlab = "σ_ee  (E→E spread)"
+    # dg plane (δ × Δg_K)
+    circuit_heatmap!(
+        gss[1], δ_coarse, gk_coarse, A_coarse;
+        xlabel = δlab, ylabel = gklab, title = "Circuit:  a", clabel = "a"
+    )
+    circuit_heatmap!(
+        gss[2], δ_coarse, gk_coarse, B_coarse;
+        xlabel = δlab, ylabel = gklab, title = "Circuit:  b", clabel = "b"
+    )
+    # ds plane (δ × σ_ee)
+    circuit_heatmap!(
+        gss[3], δ_coarse, σ_coarse, A_ds_coarse;
+        xlabel = δlab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
+    )
+    circuit_heatmap!(
+        gss[4], δ_coarse, σ_coarse, B_ds_coarse;
+        xlabel = δlab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
+    )
+    # gs plane (Δg_K × σ_ee)
+    circuit_heatmap!(
+        gss[5], gk_coarse, σ_coarse, A_gs_coarse;
+        xlabel = gklab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
+    )
+    circuit_heatmap!(
+        gss[6], gk_coarse, σ_coarse, B_gs_coarse;
+        xlabel = gklab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
+    )
+end
+addlabels!(fs)
+suppfile = joinpath(outdir, "hierarchical_variation_supp.pdf")
+wsave(suppfile, fs)
+@info "Saved $suppfile"

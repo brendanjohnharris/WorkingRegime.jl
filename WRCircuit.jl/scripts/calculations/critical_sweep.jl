@@ -13,8 +13,8 @@ WRCircuit.@preamble
 
 begin # * Sweep configuration
     B = 32
-    seeds = 1:3                                # connectome realizations → the 'Obs' (integer seed) dimension
-    arch = WRCircuit.DEWDROP_BACKEND()         # CPU by default; `Dewdrop.GPU()` fills the GPU with the batch
+    seeds = 1:10
+    arch = WRCircuit.DEWDROP_BACKEND()
     path = datadir("critical_sweep")
 
     defaults = WRCircuit.defaults(WRCircuit.models.Spatial)
@@ -43,7 +43,42 @@ begin # * Parameter planes: three 2-D planes through the default working-regime 
     plane_ds = [(; delta = d, Delta_g_K = Delta_g_K_0, sigma_ee = s) for d in delta, s in sigma_ee]
     plane_gs = [(; delta = delta_0, Delta_g_K = gk, sigma_ee = s) for gk in Delta_g_K, s in sigma_ee]
     parameter_vector = unique(vcat(vec(plane_dg), vec(plane_ds), vec(plane_gs)))
+
+    tau_r_e = round.(range(0.5, 2.0, length = 31); sigdigits = 3)
+    tau_d_e = round.(range(2.0, 8.0, length = 25); sigdigits = 3)
+    plane_td = vec([(; tau_r_e = tr, tau_d_e = td) for tr in tau_r_e, td in tau_d_e])
+
     isdir(path) || mkpath(path)
+end
+
+# Rebuild member `i`'s labelled (stat × Neuron) arrays from its on-device-reduced slice and save one result
+# file. `c` is the member's varied-parameter NamedTuple --- (delta, Delta_g_K, sigma_ee) for the main planes,
+# (tau_r_e, tau_d_e) for the τ_syn plane --- and sets BOTH the saved `parameters` (merged onto `defaults`) and
+# the savename; `seed` is the Obs dimension. Shared by both run blocks so the save recipe lives in one place.
+function save_member!(bs, i, c, seed)
+    NE = size(bs.record.rate.data, 1)
+    neuron_labels = Neuron(Symbol.("E" .* string.(1:NE)))
+    lag_axis = 𝑡(τs)                                                       # MAD lag axis (physical time)
+    nfreq = size(bs.record.psd.data, 3)
+    freq_axis = 𝑓(range(0, inv(2 * dt_ms), length = nfreq) .* u"ms^-1")    # Welch one-sided frequencies
+    fano_axis = 𝑡(fano_taus .* u"ms")                                      # Fano timescale axis
+    mad = ToolsArray(permutedims(bs.record.mad.data[:, i, :]), (lag_axis, neuron_labels))
+    # Log-sample each neuron's fine PSD onto critical_demo's log-frequency grid (geometric mean per equal-width
+    # log10 bin): the exponent fit sees the SAME resolution as scripts/plots/critical_demo.jl and the saved
+    # array stays tiny (~50 pts vs ~5000 linear bins). ustripall first (logsample takes log10 of the
+    # frequencies), select the 10-1000 Hz band by its ms^-1 value (a u"Hz" selector on the fresh range axis
+    # throws), then re-attach ms^-1 units so downstream `spectral_exponents` can still select in u"Hz".
+    psd_fine = ustripall(ToolsArray(permutedims(bs.record.psd.data[:, i, :]), (freq_axis, neuron_labels)))
+    cols = map(col -> logsample(col[𝑓 = 0.01 .. 1.0]), eachslice(psd_fine; dims = Neuron))
+    logf = 𝑓(collect(lookup(first(cols), 𝑓)) .* u"ms^-1")
+    psd = ToolsArray(reduce(hcat, map(collect, cols)), (logf, neuron_labels))
+    fano = ToolsArray(permutedims(bs.record.fano.data[:, i, :]), (fano_axis, neuron_labels))
+    rate = ToolsArray(uconvert.(u"Hz", bs.record.rate.data[:, i] .* u"ms^-1"), neuron_labels)
+    out = Dict(
+        "parameters" => (; defaults..., c..., seed = seed),   # `seed` is the Obs dimension
+        "rate" => rate, "fano" => fano, "inputs/mad" => mad, "inputs/psd" => psd,
+    )
+    return wsave(joinpath(path, savename((; c..., seed = seed), "jld2"; connector)), out)
 end
 
 begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B) batch over (delta, Delta_g_K)
@@ -69,33 +104,8 @@ begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B
                     mad_lags = mad_lags, psd_fmin = psd_fmin, fano_taus = fano_taus, rate = true,
                     transient = transient_steps,
                 )
-                NE = size(bs.record.rate.data, 1)
-                neuron_labels = Neuron(Symbol.("E" .* string.(1:NE)))
-                lag_axis = 𝑡(τs)                                                       # MAD lag axis (physical time)
-                nfreq = size(bs.record.psd.data, 3)
-                freq_axis = 𝑓(range(0, inv(2 * dt_ms), length = nfreq) .* u"ms^-1")    # Welch one-sided frequencies
-                fano_axis = 𝑡(fano_taus .* u"ms")                                      # Fano timescale axis
                 for (i, c) in enumerate(chunk)
-                    # Rebuild the labelled (stat × Neuron) arrays from member i's on-device-reduced slice.
-                    mad = ToolsArray(permutedims(bs.record.mad.data[:, i, :]), (lag_axis, neuron_labels))
-                    # Log-sample each neuron's fine PSD onto critical_demo's log-frequency grid (equal-width
-                    # log10 bins, geometric mean per bin): the exponent fit then sees the SAME resolution as
-                    # scripts/plots/critical_demo.jl, and the saved array stays tiny (~50 pts vs ~5000 linear bins).
-                    # ustripall first (logsample takes log10 of the frequencies), select the fit band by its
-                    # ms^-1 value (0.01-1.0 = 10-1000 Hz; a u"Hz" selector on the fresh range axis throws), then
-                    # re-attach ms^-1 units so downstream `spectral_exponents` can still select in u"Hz".
-                    psd_fine = ustripall(ToolsArray(permutedims(bs.record.psd.data[:, i, :]), (freq_axis, neuron_labels)))
-                    cols = map(c -> logsample(c[𝑓 = 0.01 .. 1.0]), eachslice(psd_fine; dims = Neuron))
-                    logf = 𝑓(collect(lookup(first(cols), 𝑓)) .* u"ms^-1")
-                    psd = ToolsArray(reduce(hcat, map(collect, cols)), (logf, neuron_labels))
-                    fano = ToolsArray(permutedims(bs.record.fano.data[:, i, :]), (fano_axis, neuron_labels))
-                    rate = ToolsArray(uconvert.(u"Hz", bs.record.rate.data[:, i] .* u"ms^-1"), neuron_labels)
-                    parameters = (; defaults..., c..., seed = seed)   # `seed` is the Obs dimension
-                    out = Dict(
-                        "parameters" => parameters, "rate" => rate, "fano" => fano,
-                        "inputs/mad" => mad, "inputs/psd" => psd,
-                    )
-                    wsave(joinpath(path, savename((; c..., seed = seed), "jld2"; connector)), out)
+                    save_member!(bs, i, c, seed)
                 end
                 bs = nothing
                 GC.gc()
@@ -105,4 +115,36 @@ begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B
     end
     nfiles = count(endswith(".jld2"), readdir(path))
     @info "Sweep done: $nfiles result files in $path"
+end
+
+begin # * τ_syn plane: (tau_r_e, tau_d_e) at the default point --- batched over the shared connectome
+    # One connectome per seed (sigma_ee = sigma_ee_0 fixed); the (N,B) batch co-executes B τ-cells as per-member
+    # excitatory-synapse overrides (`simulate_batch(; tau_r_e, tau_d_e)`), same cost profile as the other planes.
+    for seed in seeds
+        model = WRCircuit.Spatial(; key = seed)
+        remaining = filter(plane_td) do p
+            !isfile(joinpath(path, savename((; p..., seed = seed), "jld2"; connector)))
+        end
+        isempty(remaining) && continue
+        chunks = collect(Iterators.partition(remaining, B))
+        @info "τ_syn plane: seed $seed/$(length(seeds)) --- $(length(remaining)) cells in $(length(chunks)) batch(es)"
+        map(Chart(LogLogger(length(chunks))), chunks) do chunk
+            bs = simulate_batch(
+                model, tmax, fill(delta_0, length(chunk)), fill(Delta_g_K_0, length(chunk));
+                sigma_ee = sigma_ee_0,
+                tau_r_e = [Float64(c.tau_r_e) for c in chunk], tau_d_e = [Float64(c.tau_d_e) for c in chunk],
+                dt = dt_ms, arch = arch, progress = true, scatter = :compacted,
+                mad_lags = mad_lags, psd_fmin = psd_fmin, fano_taus = fano_taus, rate = true,
+                transient = transient_steps,
+            )
+            for (i, c) in enumerate(chunk)
+                save_member!(bs, i, c, seed)
+            end
+            bs = nothing
+            GC.gc()
+            nothing
+        end
+    end
+    nfiles = count(endswith(".jld2"), readdir(path))
+    @info "τ_syn plane done: $nfiles total result files in $path"
 end

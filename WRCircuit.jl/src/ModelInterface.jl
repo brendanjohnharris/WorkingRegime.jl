@@ -160,7 +160,10 @@ launch-bound GPU. `Delta_g_K` is an `N×B` neuron-model override (E rows get `dg
 `delta` is a per-member conductance gain on the inhibitory projections (I→E, I→I) --- the per-edge weight is
 linear in `delta`, so scaling the synapse coefficient on a connectome built at `delta = 1` reproduces each
 member's `delta` network. Fix the connectome's `seed` (via `model`) and `sigma_ee` (a keyword) per job; sweep
-`(delta, Delta_g_K)` here. The streaming Poisson drive is SHARED across members (same realization). Member
+`(delta, Delta_g_K)` here. Pass `tau_r_e`/`tau_d_e` (both together, each a scalar or a length-B vector) to
+ALSO sweep the excitatory synapse's rise/decay per member: τr/τd leave the connectome untouched, so they ride
+the shared build as per-member overrides on the exc projections (E→E, E→I, drives), reproducing a per-member
+`build_spatial(; tau_r_e, tau_d_e)`. The streaming Poisson drive is SHARED across members (same realization). Member
 `m`'s E `input` (`itot`) trace and `spike` raster are `bs.record.input.data[:, m, :]` /
 `bs.record.spike.data[:, m, :]` (a `(NE, B, nsteps)` array each). Note: each E `input` trace is
 `NE × nsteps × sizeof(T)`, so bound `B` (the chunk size) by memory.
@@ -180,7 +183,8 @@ function simulate_batch(
         model::SpatialModel, time, deltas::AbstractVector{<:Real}, dgks::AbstractVector{<:Real};
         dt = 0.1, progress = :auto, arch::Dewdrop.AbstractArchitecture = DEWDROP_BACKEND(),
         mad_lags = nothing, psd_fmin = nothing, fano_taus = nothing, rate = false,
-        transient = 0, scatter = :auto, record_spikes = nothing, kwargs...
+        transient = 0, scatter = :auto, record_spikes = nothing,
+        tau_r_e = nothing, tau_d_e = nothing, kwargs...
     )
     B = length(deltas)
     length(dgks) == B || throw(ArgumentError("deltas and dgks must be equal length (got $B and $(length(dgks)))"))
@@ -199,7 +203,31 @@ function simulate_batch(
     inh isa Dewdrop.FrozenDualExpSynapse ||
         error("simulate_batch: expected the inhibitory FrozenDualExpSynapse at projection 3 (got $(typeof(inh)))")
     a_vec = T[Dewdrop._dualexp_a(inh.τr, inh.τd) * deltas[m] / delta0 for m in 1:B]
-    syn_over = Dict(3 => (; a = a_vec), 4 => (; a = a_vec))
+    syn_over = Dict{Int, Any}(3 => (; a = a_vec), 4 => (; a = a_vec))
+    # Optional τ sweep: vary the EXCITATORY synapse's rise/decay per member. τr/τd don't touch the connectome
+    # (edges/weights/delays are identical), only the synapse's per-step decay factors + its peak-normalising `a`,
+    # so they ride the shared connectome as per-member overrides --- exactly like `delta`, but on the exc-carrying
+    # projections (E→E, E→I and the two external drives, identified by their excitatory reversal Erev; the drive
+    # override recurses into the wrapped inner synapse). Pass BOTH `tau_r_e` and `tau_d_e` (each a scalar broadcast
+    # to B, or a length-B vector); this reproduces `build_spatial(; tau_r_e, tau_d_e)` per member on ONE build.
+    if tau_r_e !== nothing || tau_d_e !== nothing
+        (tau_r_e !== nothing && tau_d_e !== nothing) ||
+            throw(ArgumentError("simulate_batch: pass BOTH tau_r_e and tau_d_e for a τ sweep"))
+        _bcast(x) = x isa Real ? fill(Float64(x), B) :
+            (length(x) == B ? collect(Float64, x) : throw(ArgumentError("simulate_batch: tau_* length $(length(x)) ≠ batch B = $B")))
+        τr, τd = _bcast(tau_r_e), _bcast(tau_d_e)
+        all(τr .!= τd) || throw(ArgumentError("simulate_batch: the dual-exp synapse needs τr ≠ τd for every member"))
+        ov_e = (;
+            a = T[Dewdrop._dualexp_a(τr[m], τd[m]) for m in 1:B],
+            decay_r = T[exp(-dt / τr[m]) for m in 1:B],
+            decay_d = T[exp(-dt / τd[m]) for m in 1:B],
+        )
+        _basesyn(p) = (s = p.synapse; hasfield(typeof(s), :synapse) ? getfield(s, :synapse) : s)   # unwrap drive
+        for j in 1:length(net.projections)
+            bsyn = _basesyn(net.projections[j])
+            (bsyn isa Dewdrop.FrozenDualExpSynapse && Float64(bsyn.Erev) > -40.0) && (syn_over[j] = ov_e)
+        end
+    end
     of = collect(Erange)
     tr = Int(transient)
     # Recording. Each statistic is OPT-IN via its parameter and streamed ON-DEVICE (the long trace/raster is

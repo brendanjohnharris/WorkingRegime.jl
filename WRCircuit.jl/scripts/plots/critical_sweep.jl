@@ -39,7 +39,7 @@ WRCircuit.@preamble
 # ──────────────────────────────────────────────────────────────────────────────
 try
     begin # * Add procs and load code everywhere
-        AcademicClusters.USydPhysics.distributeprocs(Inf; mem = "8GB", ncpus = 1)
+        AcademicClusters.USydPhysics.distributeprocs(Inf; mem = "6GB", ncpus = 1)
 
         @everywhere begin
             using WRCircuit
@@ -122,10 +122,34 @@ try
         ) do (gk, s, seed)
             file_at(delta_0, gk, s, seed)
         end
+        # τ_syn plane: a separate file set keyed by (tau_r_e, tau_d_e, seed) --- the main filter above drops
+        # these (they carry no delta/Delta_g_K/sigma_ee keys), so index them here into a 4th grid over
+        # (tau_r_e, tau_d_e, seed) at the same default working-regime point.
+        tau_entries = filter(
+            !isnothing, map(files) do f
+                fname = parse_savename(f; connector = string(connector))[2]
+                needed = ("tau_r_e", "tau_d_e", "seed")
+                (haskey(fname, "key") || !all(k -> haskey(fname, k), needed)) && return nothing
+                return (; file = f, tau_r_e = fname["tau_r_e"], tau_d_e = fname["tau_d_e"], seed = Int(fname["seed"]))
+            end
+        )
+        utau_r = sort(unique(e.tau_r_e for e in tau_entries))
+        utau_d = sort(unique(e.tau_d_e for e in tau_entries))
+        tau_lookup = Dict((e.tau_r_e, e.tau_d_e, e.seed) => e.file for e in tau_entries)
+        grid_td = map(
+            collect(
+                Iterators.product(
+                    Dim{:tau_r_e}(utau_r), Dim{:tau_d_e}(utau_d), Dim{:seed}(useed)
+                )
+            )
+        ) do (tr, td, seed)
+            get(tau_lookup, (tr, td, seed), nothing)
+        end
         @info "Plane cells (incl. seed): " *
             "dg $(count(!isnothing, grid_dg))/$(length(grid_dg)), " *
             "ds $(count(!isnothing, grid_ds))/$(length(grid_ds)), " *
-            "gs $(count(!isnothing, grid_gs))/$(length(grid_gs)); " *
+            "gs $(count(!isnothing, grid_gs))/$(length(grid_gs)), " *
+            "td $(count(!isnothing, grid_td))/$(length(grid_td)); " *
             "anchors delta_0=$delta_0, Delta_g_K_0=$Delta_g_K_0, sigma_ee_0=$sigma_ee_0"
     end
 
@@ -161,6 +185,11 @@ try
         b_ds = fit_grid(grid_ds, "inputs/psd", spectral_exponents; step = neuron_step)
         @info "b_gs"
         b_gs = fit_grid(grid_gs, "inputs/psd", spectral_exponents; step = neuron_step)
+
+        @info "a_td"
+        a_td = fit_grid(grid_td, "inputs/mad", diffusion_exponents; step = neuron_step)
+        @info "b_td"
+        b_td = fit_grid(grid_td, "inputs/psd", spectral_exponents; step = neuron_step)
     end
 
     # ──────────────────────────────────────────────────────────────────────────────
@@ -174,8 +203,10 @@ try
             "a_dg" => a_dg, "b_dg" => b_dg,   # dg plane: (delta, Delta_g_K) at sigma_ee_0
             "a_ds" => a_ds, "b_ds" => b_ds,   # ds plane: (delta, sigma_ee)  at Delta_g_K_0
             "a_gs" => a_gs, "b_gs" => b_gs,   # gs plane: (Delta_g_K, sigma_ee) at delta_0
+            "a_td" => a_td, "b_td" => b_td,   # td plane: (tau_r_e, tau_d_e) at the default point
             # Shared axis lookups + the plane anchors (the default working-regime point).
             "delta" => udelta, "Delta_g_K" => ugk, "sigma_ee" => usigma, "seed" => useed,
+            "tau_r_e" => utau_r, "tau_d_e" => utau_d,
             "delta_0" => delta_0, "Delta_g_K_0" => Delta_g_K_0, "sigma_ee_0" => sigma_ee_0,
         )
         outfile = datadir("plots", "critical_sweep.jld2")
