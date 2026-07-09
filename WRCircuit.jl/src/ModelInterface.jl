@@ -205,11 +205,13 @@ function simulate_batch(
     a_vec = T[Dewdrop._dualexp_a(inh.τr, inh.τd) * deltas[m] / delta0 for m in 1:B]
     syn_over = Dict{Int, Any}(3 => (; a = a_vec), 4 => (; a = a_vec))
     # Optional τ sweep: vary the EXCITATORY synapse's rise/decay per member. τr/τd don't touch the connectome
-    # (edges/weights/delays are identical), only the synapse's per-step decay factors + its peak-normalising `a`,
-    # so they ride the shared connectome as per-member overrides --- exactly like `delta`, but on the exc-carrying
-    # projections (E→E, E→I and the two external drives, identified by their excitatory reversal Erev; the drive
-    # override recurses into the wrapped inner synapse). Pass BOTH `tau_r_e` and `tau_d_e` (each a scalar broadcast
-    # to B, or a length-B vector); this reproduces `build_spatial(; tau_r_e, tau_d_e)` per member on ONE build.
+    # (edges/weights/delays are identical), so they ride the shared connectome as per-member PHYSICAL-parameter
+    # overrides on the exc-carrying projections (E→E, E→I and the two external drives, identified by their
+    # excitatory reversal Erev; the drive override recurses into the wrapped inner synapse). Dewdrop re-derives
+    # each member's decay factors and peak-normalising `a` from τr/τd internally (`_syn_coeffs`), so we pass the
+    # physical τr/τd directly --- no client-side `exp(-dt/τ)` / `_dualexp_a` reparameterisation. Pass BOTH
+    # `tau_r_e` and `tau_d_e` (each a scalar broadcast to B, or a length-B vector); reproduces
+    # `build_spatial(; tau_r_e, tau_d_e)` per member on ONE build.
     if tau_r_e !== nothing || tau_d_e !== nothing
         (tau_r_e !== nothing && tau_d_e !== nothing) ||
             throw(ArgumentError("simulate_batch: pass BOTH tau_r_e and tau_d_e for a τ sweep"))
@@ -217,11 +219,7 @@ function simulate_batch(
             (length(x) == B ? collect(Float64, x) : throw(ArgumentError("simulate_batch: tau_* length $(length(x)) ≠ batch B = $B")))
         τr, τd = _bcast(tau_r_e), _bcast(tau_d_e)
         all(τr .!= τd) || throw(ArgumentError("simulate_batch: the dual-exp synapse needs τr ≠ τd for every member"))
-        ov_e = (;
-            a = T[Dewdrop._dualexp_a(τr[m], τd[m]) for m in 1:B],
-            decay_r = T[exp(-dt / τr[m]) for m in 1:B],
-            decay_d = T[exp(-dt / τd[m]) for m in 1:B],
-        )
+        ov_e = (; τr = τr, τd = τd)   # physical params; Dewdrop derives decay_r / decay_d / a per member
         _basesyn(p) = (s = p.synapse; hasfield(typeof(s), :synapse) ? getfield(s, :synapse) : s)   # unwrap drive
         for j in 1:length(net.projections)
             bsyn = _basesyn(net.projections[j])

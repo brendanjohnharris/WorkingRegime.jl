@@ -10,7 +10,7 @@ using CUDA
 using TerminalLoggers: TerminalLogger
 import Logging
 
-export convert2, terminal_logging!
+export convert2
 
 const DEWDROP_BACKEND = Dewdrop.GPU
 
@@ -43,24 +43,5 @@ const stats = (;
     efficiency = Dewdrop.efficiency,
 )
 
-"""
-    terminal_logging!()
-
-Route progress bars and logs to the REPL terminal via TerminalLoggers, replacing VSCode's native progress
-widget --- so `simulate`/`bpsolve` progress renders inline in the REPL. Installed automatically on load in
-interactive sessions; call it manually to re-enable (e.g. after another package resets the global logger).
-Restore the default logger with `Logging.global_logger(Logging.ConsoleLogger())` or by restarting the REPL.
-"""
-terminal_logging!() = (Logging.global_logger(TerminalLogger()); nothing)
-
-# NOTE: the global TerminalLogger is installed from the user's startup.jl (BEFORE any package loads),
-# not here. Installing it in __init__ runs AFTER the GPU stack has loaded, so
-# `min_enabled_level(::TerminalLogger)` lands at a world age newer than the kernel-compile world ---
-# GPUCompiler introspects `global_logger()` during compilation and crashes ("method too new") on cold
-# batch runs. Registering TerminalLogger first (startup.jl) keeps that method visible at the compile
-# world. Call `terminal_logging!()` manually to opt in within a session.
-function __init__()
-    return nothing
-end
 
 end # module

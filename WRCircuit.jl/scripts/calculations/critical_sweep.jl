@@ -8,7 +8,6 @@ DrWatson.@quickactivate :WRCircuit
 using WRCircuit
 using JLD2
 using MoreMaps
-using Statistics
 WRCircuit.@preamble
 
 begin # * Sweep configuration
@@ -51,6 +50,22 @@ begin # * Parameter planes: three 2-D planes through the default working-regime 
     isdir(path) || mkpath(path)
 end
 
+# Shared run helpers: the resume path (defined once, used by both filters and `save_member!`), the fixed
+# reduction kwargs, and the run-a-batch-then-save loop, so both sweep blocks below stay thin.
+savepath(p, seed) = joinpath(path, savename((; p..., seed = seed), "jld2"; connector))
+saved(p, seed) = isfile(savepath(p, seed))
+const RED = (; dt = dt_ms, arch, progress = true, scatter = :compacted,
+             mad_lags, psd_fmin, fano_taus, rate = true, transient = transient_steps)
+function run_and_save!(model, chunk, seed, deltas, dgks; member...)
+    bs = simulate_batch(model, tmax, deltas, dgks; member..., RED...)
+    for (i, c) in enumerate(chunk)
+        save_member!(bs, i, c, seed)
+    end
+    bs = nothing
+    GC.gc()
+    return nothing
+end
+
 # Rebuild member `i`'s labelled (stat × Neuron) arrays from its on-device-reduced slice and save one result
 # file. `c` is the member's varied-parameter NamedTuple --- (delta, Delta_g_K, sigma_ee) for the main planes,
 # (tau_r_e, tau_d_e) for the τ_syn plane --- and sets BOTH the saved `parameters` (merged onto `defaults`) and
@@ -78,37 +93,22 @@ function save_member!(bs, i, c, seed)
         "parameters" => (; defaults..., c..., seed = seed),   # `seed` is the Obs dimension
         "rate" => rate, "fano" => fano, "inputs/mad" => mad, "inputs/psd" => psd,
     )
-    return wsave(joinpath(path, savename((; c..., seed = seed), "jld2"; connector)), out)
+    return wsave(savepath(c, seed), out)
 end
 
 begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B) batch over (delta, Delta_g_K)
     for seed in seeds
         model = WRCircuit.Spatial(; key = seed)
         # this seed's not-yet-saved combos (resume), grouped by sigma_ee (the connectome axis → one build each)
-        remaining = filter(parameter_vector) do p
-            !isfile(joinpath(path, savename((; p..., seed = seed), "jld2"; connector)))
-        end
+        remaining = filter(p -> !saved(p, seed), parameter_vector)
         isempty(remaining) && continue
         @info "Computing seed $seed/$(length(seeds))"
         sigmas = unique(p.sigma_ee for p in remaining)
-        C = Chart(LogLogger(length(sigmas)))
-        map(C, sigmas) do σ
+        map(Chart(LogLogger(length(sigmas))), sigmas) do σ
             combos = filter(p -> p.sigma_ee == σ, remaining)
             for chunk in Iterators.partition(combos, B)
-                deltas = [Float64(c.delta) for c in chunk]
-                dgks = [Float64(c.Delta_g_K) for c in chunk]
                 @debug "seed $seed / sigma_ee $σ: batch of $(length(chunk))"
-                bs = simulate_batch(
-                    model, tmax, deltas, dgks;
-                    sigma_ee = σ, dt = dt_ms, arch = arch, progress = true, scatter = :compacted,
-                    mad_lags = mad_lags, psd_fmin = psd_fmin, fano_taus = fano_taus, rate = true,
-                    transient = transient_steps,
-                )
-                for (i, c) in enumerate(chunk)
-                    save_member!(bs, i, c, seed)
-                end
-                bs = nothing
-                GC.gc()
+                run_and_save!(model, chunk, seed, [c.delta for c in chunk], [c.Delta_g_K for c in chunk]; sigma_ee = σ)
             end
             nothing
         end
@@ -122,26 +122,14 @@ begin # * τ_syn plane: (tau_r_e, tau_d_e) at the default point --- batched over
     # excitatory-synapse overrides (`simulate_batch(; tau_r_e, tau_d_e)`), same cost profile as the other planes.
     for seed in seeds
         model = WRCircuit.Spatial(; key = seed)
-        remaining = filter(plane_td) do p
-            !isfile(joinpath(path, savename((; p..., seed = seed), "jld2"; connector)))
-        end
+        remaining = filter(p -> !saved(p, seed), plane_td)
         isempty(remaining) && continue
         chunks = collect(Iterators.partition(remaining, B))
         @info "τ_syn plane: seed $seed/$(length(seeds)) --- $(length(remaining)) cells in $(length(chunks)) batch(es)"
         map(Chart(LogLogger(length(chunks))), chunks) do chunk
-            bs = simulate_batch(
-                model, tmax, fill(delta_0, length(chunk)), fill(Delta_g_K_0, length(chunk));
-                sigma_ee = sigma_ee_0,
-                tau_r_e = [Float64(c.tau_r_e) for c in chunk], tau_d_e = [Float64(c.tau_d_e) for c in chunk],
-                dt = dt_ms, arch = arch, progress = true, scatter = :compacted,
-                mad_lags = mad_lags, psd_fmin = psd_fmin, fano_taus = fano_taus, rate = true,
-                transient = transient_steps,
-            )
-            for (i, c) in enumerate(chunk)
-                save_member!(bs, i, c, seed)
-            end
-            bs = nothing
-            GC.gc()
+            n = length(chunk)
+            run_and_save!(model, chunk, seed, fill(delta_0, n), fill(Delta_g_K_0, n);
+                          sigma_ee = sigma_ee_0, tau_r_e = [c.tau_r_e for c in chunk], tau_d_e = [c.tau_d_e for c in chunk])
             nothing
         end
     end
