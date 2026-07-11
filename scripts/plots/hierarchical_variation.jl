@@ -7,12 +7,13 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 #
 # Layout (4 rows × 2 cols):
 #   Row 1    — the (a, b) plane at L2/3 (left) and L6 (right). Each carries the
-#              neuropixels scatter coloured by anatomical hierarchy score, plus
-#              five mean-direction arrows anchored at the scatter centroid that
-#              show the local Jacobian directions of two forward maps at their
-#              canonical operating points:
-#                · circuit (δ, Δg_K, σ_ee) → (a, b) [green/purple/orange], from critical_sweep.jld2;
-#                · bFNS theory (α, β) → (a, b)       [red/blue], from the flat bFNS sweep.
+#              neuropixels scatter coloured categorically by region (ordered by
+#              anatomical hierarchy; see the per-panel colorbar legend), plus
+#              four mean-direction arrows sharing one origin in the top-right
+#              quadrant that show the local Jacobian directions of two forward
+#              maps at their canonical operating points:
+#                · circuit τ_syn (τ_r, τ_d) → (a, b) [green/orange], from critical_sweep.jld2;
+#                · bFNS theory (α, β) → (a, b)       [blue/red], from the flat bFNS sweep.
 #   Rows 2-4 — heatmaps for the three circuit forward-map planes, a (left) and b
 #              (right): (δ, Δg_K), (δ, σ_ee) and (Δg_K, σ_ee). Each cell is a
 #              per-neuron-exponent median pooled across the connectome seeds.
@@ -32,13 +33,41 @@ using Random
 
 set_theme!(fathom())
 
-# ──────────────────────────────────────────────────────────────────────────────
-# JLD2 typemap: SpatiotemporalMotifs' dim types (SessionID, Structure, …) are
-# not in WorkingRegime's env, so on load we upgrade every saved ToolsArray to a
-# lightweight NamedArray that keeps numeric data + (dim-name => lookup) pairs.
-# The upgrade is recursive, so nested ToolsArrays (e.g. coeffs_median) are
-# upgraded too. Pattern copied from scripts/plots/combined_curves.jl.
-# ──────────────────────────────────────────────────────────────────────────────
+
+const structures = ["VISp", "VISl", "VISrl", "VISal", "VISpm", "VISam"]
+const hierarchy_scores = Dict(
+    "VISp" => -0.357, "VISl" => -0.093, "VISrl" => -0.059,
+    "VISal" => 0.152, "VISpm" => 0.327, "VISam" => 0.441
+)
+const stim = "spontaneous"
+
+# Layer integer codes in the saved data: 2 = L2/3, 3 = L4, 4 = L5, 5 = L6.
+const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
+
+const DELTA_MIN = 4
+const DGK_MIN = 0.001
+const SIGMA_MIN = 0.06
+const SIGMA_MAX = 0.075
+
+const TAU_R_MIN = 0.5
+const TAU_R_MAX = 1.5
+const TAU_D_MIN = 3
+const TAU_D_MAX = 7
+
+# Span of the local window over which the τ_syn arrow directions are measured. The (τ_r, τ_d)
+# Jacobian is read across a window of this width centered on the green working point (τr_0, τd_0),
+# not across the whole heatmap ROI.
+const DELTA_TAU_R = 0.2
+const DELTA_TAU_D = 0.4
+
+# Draw the circuit τ_r / τ_d direction arrows on the (a, b) panels. Set false to show only the bFNS α/β arrows.
+const SHOW_TAU_ARROWS = false
+
+# Shared origin of the direction arrows, in (a, b) data coordinates.
+const ARROW_ORIGIN = (0.55, -1.75)
+
+const outdir = plotsdir("hierarchical_variation")
+mkpath(outdir)
 
 struct NamedArray{T, N}
     data::Array{T, N}
@@ -118,28 +147,6 @@ function bootstrapmedian(x; N = 10_000, α = 0.05)
     return median(x), Tuple(quantile(meds, (α / 2, 1 - α / 2)))
 end
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Constants — Siegle 2021 anatomical hierarchy scores (mouse visual cortex)
-# (transcribed from SpatiotemporalMotifs/src/Plots.jl)
-# ──────────────────────────────────────────────────────────────────────────────
-
-const structures = ["VISp", "VISl", "VISrl", "VISal", "VISpm", "VISam"]
-const hierarchy_scores = Dict(
-    "VISp" => -0.357, "VISl" => -0.093, "VISrl" => -0.059,
-    "VISal" => 0.152, "VISpm" => 0.327, "VISam" => 0.441
-)
-const stim = "spontaneous"
-
-# Layer integer codes in the saved data: 2 = L2/3, 3 = L4, 4 = L5, 5 = L6.
-const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
-
-const DELTA_MIN = 4
-const DGK_MIN = 0.001
-const SIGMA_MIN = 0.06
-const SIGMA_MAX = 0.075
-
-const outdir = plotsdir("hierarchical_variation")
-mkpath(outdir)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Load aggregated experiment data
@@ -189,13 +196,23 @@ const _A_ds_full = Base.invokelatest(seed_pooled_median, circuit["a_ds"].data)
 const _B_ds_full = Base.invokelatest(seed_pooled_median, circuit["b_ds"].data)
 const _A_gs_full = Base.invokelatest(seed_pooled_median, circuit["a_gs"].data)
 const _B_gs_full = Base.invokelatest(seed_pooled_median, circuit["b_gs"].data)
-# td plane (τ_r_e × τ_d_e): the excitatory-synapse time-constant plane from the batched sweep. Plotted at
-# full 8×8 resolution --- no ROI slice or coarsening (it is already small, and the full plane shows how a
-# rises with τ_r and the fit blows up in the fast-rise/slow-decay corner).
+# td plane (τ_r_e × τ_d_e): the excitatory-synapse time-constant plane from the batched sweep. The heatmaps
+# are sliced to the TAU_R/TAU_D ROI while the arrows keep the full grid.
 const _A_td_full = Base.invokelatest(seed_pooled_median, circuit["a_td"].data)
 const _B_td_full = Base.invokelatest(seed_pooled_median, circuit["b_td"].data)
 const τr_lookup = collect(circuit["tau_r_e"])
 const τd_lookup = collect(circuit["tau_d_e"])
+# Heatmap ROI slice (τ_r rows, τ_d cols), same value-range idiom as the δ/Δg_K/σ_ee planes.
+const τr_keep = findall(v -> TAU_R_MIN <= v <= TAU_R_MAX, τr_lookup)
+const τd_keep = findall(v -> TAU_D_MIN <= v <= TAU_D_MAX, τd_lookup)
+const τr_td = τr_lookup[τr_keep]
+const τd_td = τd_lookup[τd_keep]
+# Default working-regime τ_syn point (Spatial model defaults, snapped to the grid).
+# Falls back to the known defaults if the sweep predates saving the anchor.
+const τr_0 = haskey(circuit, "tau_r_e_0") ? Float64(circuit["tau_r_e_0"]) : 1.0
+const τd_0 = haskey(circuit, "tau_d_e_0") ? Float64(circuit["tau_d_e_0"]) : 5.0
+const A_td = _A_td_full[τr_keep, τd_keep]
+const B_td = _B_td_full[τr_keep, τd_keep]
 
 # Slice each axis to its region of interest: δ > DELTA_MIN, Δg_K > DGK_MIN and
 # σ_ee ∈ [SIGMA_MIN, SIGMA_MAX]. Each plane uses the slices of its own two axes.
@@ -212,43 +229,6 @@ const B_ds = _B_ds_full[δ_keep, σ_keep]
 const A_gs = _A_gs_full[gk_keep, σ_keep]     # gs plane (Δg_K × σ_ee)
 const B_gs = _B_gs_full[gk_keep, σ_keep]
 
-# Coarse-grain for display: average each COARSEN×COARSEN block of cells into one
-# pixel (NaN-aware). Only the heatmaps are coarsened; the mean-direction arrows
-# use the full-resolution grids.
-const COARSEN = 2
-
-"Average `M` into non-overlapping `b×b` blocks; partial edge blocks average over
-whatever they contain. NaN cells are ignored; an all-NaN block stays NaN."
-function block_average(M::AbstractMatrix, b)
-    R, C = size(M)
-    out = Matrix{Float64}(undef, cld(R, b), cld(C, b))
-    for i in axes(out, 1), j in axes(out, 2)
-        rows = ((i - 1) * b + 1):min(i * b, R)
-        cols = ((j - 1) * b + 1):min(j * b, C)
-        block = filter(!isnan, vec(M[rows, cols]))
-        out[i, j] = isempty(block) ? NaN : mean(block)
-    end
-
-    return out
-end
-
-"Average a lookup vector into non-overlapping blocks of size `b` (block centres)."
-function block_average(v::AbstractVector, b)
-    n = length(v)
-    return [mean(v[((i - 1) * b + 1):min(i * b, n)]) for i in 1:cld(n, b)]
-end
-
-# Coarsened axes (shared where planes share an axis) and per-plane grids.
-const δ_coarse = Base.invokelatest(block_average, δ_lookup, COARSEN)
-const gk_coarse = Base.invokelatest(block_average, gk_lookup, COARSEN)
-const σ_coarse = Base.invokelatest(block_average, σ_lookup, COARSEN)
-const A_coarse = Base.invokelatest(block_average, A_grid, COARSEN)
-const B_coarse = Base.invokelatest(block_average, B_grid, COARSEN)
-const A_ds_coarse = Base.invokelatest(block_average, A_ds, COARSEN)
-const B_ds_coarse = Base.invokelatest(block_average, B_ds, COARSEN)
-const A_gs_coarse = Base.invokelatest(block_average, A_gs, COARSEN)
-const B_gs_coarse = Base.invokelatest(block_average, B_gs, COARSEN)
-
 # Mean direction vectors of the circuit forward map in (a, b). Rather than
 # drawing full isolines, we summarise each knob's effect as a single net
 # displacement F(param_max) − F(param_min), averaged over the other parameter
@@ -256,15 +236,15 @@ const B_gs_coarse = Base.invokelatest(block_average, B_gs, COARSEN)
 #
 # The circuit arrows read the τ_syn (τ_r_e, τ_d_e) plane --- the excitatory synaptic time constants, the
 # knobs that actually move the exponents (δ / Δg_K / σ_ee barely do; those planes are in the supplement).
-#   τ_r arrow: τ_r_e swept over the clean low-rise band, averaged over τ_d_e   (td plane)
-#   τ_d arrow: τ_d_e swept over its full range, averaged over the low-τ_r band (td plane)
+#   τ_r arrow: τ_r_e swept over the TAU_R ROI, averaged over the TAU_D ROI   (td plane)
+#   τ_d arrow: τ_d_e swept over the TAU_D ROI, averaged over the TAU_R ROI   (td plane)
 # The fast-rise/slow-decay corner drives the 2-component MAD fit's first component past 1 (an artefact, not a
-# regime), so mask a > 1 to NaN (mean_direction skips NaN corners) and keep the τ_r sweep in the clean band.
+# regime), so mask a > 1 to NaN; mean_direction skips those endpoint cells even though the sweep spans the ROI.
 const _td_bad = _A_td_full .> 1
 const _A_td_arrow = ifelse.(_td_bad, NaN, _A_td_full)
 const _B_td_arrow = ifelse.(_td_bad, NaN, _B_td_full)
-const τr_arrow_range = (minimum(τr_lookup), 1.2)   # low-rise band, near the neuropixels operating point (low a)
-const τd_arrow_range = (minimum(τd_lookup), 5.5)    # low-decay band --- the scatter sits at low a ⇒ short τ_d
+const τr_arrow_range = (τr_0 - DELTA_TAU_R / 2, τr_0 + DELTA_TAU_R / 2)   # window centered on the green working point
+const τd_arrow_range = (τd_0 - DELTA_TAU_D / 2, τd_0 + DELTA_TAU_D / 2)
 
 "Nearest grid index to a target value in a lookup vector."
 _nearest(lookup, v) = argmin(abs.(lookup .- v))
@@ -355,9 +335,11 @@ const B_ab = Base.invokelatest(_ab_grid, bfns["spectral_exponent"])
 
 # Local Jacobian directions at the canonical operating point (α = 1.5, β = 0.85):
 #   α arrow: α swept 1.35 → 1.65, averaged over β ∈ [0.75, 0.95]
-#   β arrow: β swept 0.70 → 1.00, averaged over α ∈ [1.35, 1.65]
+#   β arrow: β swept 0.75 → 0.95, averaged over α ∈ [1.35, 1.65]
+# β stops short of 1.0: that boundary cell of the bFNS sweep is corrupted (b snaps -1.94 → -1.58),
+# and mean_direction's endpoint-only difference would otherwise cancel Δb and point the arrow sideways.
 const α_arrow_range = (1.35, 1.65)
-const β_arrow_range = (0.7, 1.0)
+const β_arrow_range = (0.75, 0.95)
 const α_dir = mean_direction(
     A_ab, B_ab, _α_lookup, α_arrow_range,
     _β_lookup, (0.75, 0.95); dim = 1
@@ -409,7 +391,13 @@ end
 
 const points_l23 = compute_points(2)   # L2/3
 const points_l6 = compute_points(5)    # L6
-const hrange = extrema(values(hierarchy_scores))
+
+# Categorical colour per region, ordered low → high hierarchy (`structures` is
+# already in ascending-score order). Scatter points and the colorbar draw from
+# this same discrete gradient so they stay consistent.
+const region_colors = cgrad(binarysunset, length(structures); categorical = true)
+const structure_color = Dict(s => region_colors[i] for (i, s) in enumerate(structures))
+const HEATMAP = sunrise
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Hero-panel drawer. The circuit sweep curves and operating-point marker are
@@ -429,56 +417,48 @@ function label_tip!(ax, anchor, vec, label, color)
     )
 end
 
-function plot_hero!(
-        ax, points; arrow_offset = (0.0, 0.0),
-        label_align = (:left, :bottom), label_offset = (6, 6)
-    )
+function plot_hero!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1.0))
     xs = [p.a for p in points]
     ys = [p.b for p in points]
 
     vlines!(ax, [0.5]; color = :gray, linestyle = :dash, linewidth = 1)
 
-    # Mean-direction arrows, all anchored at the centroid of the experimental
-    # scatter (plus an optional per-panel `arrow_offset` in data units to keep the
-    # glyphs clear of the scatter). Three read the circuit forward map (δ, Δg_K,
-    # σ_ee), two read the bFNS theory map (α, β). The raw displacement vectors span
-    # very different magnitudes, so we rescale each to a fixed on-panel length — these
-    # glyphs convey *direction*, not magnitude. Length is set to a fraction of the
-    # data's diagonal spread so it adapts to whatever the autoscaled axis ends up
-    # being.
-    cx, cy = mean(xs) + arrow_offset[1], mean(ys) + arrow_offset[2]
-    span = hypot(maximum(xs) - minimum(xs), maximum(ys) - minimum(ys))
-    arrow_len = 0.6 * span
-    scaled(v) = (n = hypot(v...); n == 0 ? v : (v .* (arrow_len / n)))
+    # Mean-direction arrows, all sharing one origin fixed at ARROW_ORIGIN in (a, b)
+    # data coordinates (plus an optional per-panel `arrow_offset` in data units).
+    # Two read the circuit forward map (τ_r, τ_d), two read the bFNS theory map (α, β).
+    # We only care about the *angle*: each vector is normalised to display units (each
+    # component ÷ its axis range) so it points along the direction read off the panel,
+    # then drawn at a fixed length. Magnitude is discarded.
+    ox = ARROW_ORIGIN[1] + arrow_offset[1]
+    oy = ARROW_ORIGIN[2] + arrow_offset[2]
+    ra, rb = axis_ranges                             # display ranges (a, b)
+    arrow_len = 0.25                                  # fraction of each axis range
+    function scaled(v)
+        u = (v[1] / ra, v[2] / rb)                   # display-fraction direction
+        n = hypot(u...)
+        n == 0 && return (0.0, 0.0)
+        return (u[1] / n * ra, u[2] / n * rb) .* arrow_len
+    end
 
-    # Two arrow fans, each at its own anchor so they don't overlap: the circuit τ_syn pair (τ_r, τ_d) sits
-    # left of the centroid, the bFNS theory (α, β) pair to the right. The split is a fraction of the data span.
-    # (vector, label, colour): synaptic time constants in green/orange, bFNS orders in red/blue.
-    split = 0.3 * span
-    pairs = (
-        (
-            (cx - split, cy), (
-                (scaled(τr_dir), "τ_r", qinghai),
-                (scaled(τd_dir), "τ_d", seohae),
-            ),
-        ),
-        (
-            (cx + split, cy), (
-                (scaled(α_dir), "α", bermejo),
-                (scaled(β_dir), "β", baikal),
-            ),
-        ),
-    )
-    for (anchor, group) in pairs
-        for (v, label, color) in group
-            arrows2d!(
-                ax, [Point2f(anchor...)], [Vec2f(v...)];
-                color, tipwidth = 12, tiplength = 12, shaftwidth = 2.5
-            )
-            # Label each arrow directly at its tip (no legend), nudged a few pixels
-            # further along the arrow and coloured to match.
-            label_tip!(ax, anchor, v, label, color)
-        end
+    # All four arrows share the origin: synaptic time constants in green/orange,
+    # bFNS orders in blue/red. (vector, label, colour).
+    arrows = SHOW_TAU_ARROWS ? (
+            (scaled(τr_dir), "τ_r", qinghai),
+            (scaled(τd_dir), "τ_d", seohae),
+            (scaled(α_dir), "α", baikal),
+            (scaled(β_dir), "β", bermejo),
+        ) : (
+            (scaled(α_dir), "α", baikal),
+            (scaled(β_dir), "β", bermejo),
+        )
+    for (v, label, color) in arrows
+        arrows2d!(
+            ax, [Point2f(ox, oy)], [Vec2f(v...)];
+            color, tipwidth = 12, tiplength = 12, shaftwidth = 2.5
+        )
+        # Label each arrow directly at its tip (no legend), nudged a few pixels
+        # further along the arrow and coloured to match.
+        label_tip!(ax, (ox, oy), v, label, color)
     end
 
 
@@ -495,17 +475,9 @@ function plot_hero!(
     )
 
     scatter!(
-        ax, xs, ys; color = [p.h for p in points], colormap = binarysunset,
-        colorrange = hrange, markersize = 18,
-        strokecolor = :black, strokewidth = 0.8
+        ax, xs, ys; color = [structure_color[p.structure] for p in points],
+        markersize = 18, strokecolor = :black, strokewidth = 0.8
     )
-
-    for p in points
-        text!(
-            ax, p.a, p.b; text = p.structure,
-            align = label_align, offset = label_offset, fontsize = 12
-        )
-    end
     return ax
 end
 
@@ -520,31 +492,37 @@ f = FourPanel()   # main figure: (a, b) scatters (top) + the τ_syn heatmaps (bo
 gs = subdivide(f, 2, 2)
 
 begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
+    scatterlimits = (
+        (0.42, 0.65),   # a
+        (-1.9, -1.5),    # b
+    )
+    # Display ranges (a, b) — arrows normalise their direction by these.
+    aranges = (
+        scatterlimits[1][2] - scatterlimits[1][1],
+        scatterlimits[2][2] - scatterlimits[2][1],
+    )
     ax_l23 = Axis(
         gs[1][1, 1]; xlabel = "Diffusion exponent  a",
         ylabel = "Spectral exponent  b",
-        title = "$stim, $(layer_names[2])"
+        title = "$stim, $(layer_names[2])", limits = scatterlimits
     )
-    plot_hero!(ax_l23, points_l23; arrow_offset = (0.0, -0.05))
+    plot_hero!(ax_l23, points_l23; axis_ranges = aranges)
 
     ax_l6 = Axis(
         gs[2][1, 1]; xlabel = "Diffusion exponent  a",
         ylabel = "Spectral exponent  b",
-        title = "$stim, $(layer_names[5])"
+        title = "$stim, $(layer_names[5])", limits = scatterlimits
     )
-    plot_hero!(
-        ax_l6, points_l6; arrow_offset = (-0.05, 0.0),
-        label_align = (:right, :center), label_offset = (-10, 0)
-    )
+    plot_hero!(ax_l6, points_l6; axis_ranges = aranges)
 
     # Share axis limits so the L2/3 ↔ L6 comparison is visually fair.
     linkaxes!(ax_l23, ax_l6)
 end
 
 "Draw one circuit forward-map heatmap (axis + colorbar) into sub-grid `pos`."
-function circuit_heatmap!(pos, x, y, z; xlabel, ylabel, title, clabel, colorrange = automatic, highclip = automatic)
+function circuit_heatmap!(pos, x, y, z; xlabel, ylabel, title, clabel, colorrange = CairoMakie.Makie.automatic, highclip = CairoMakie.Makie.automatic)
     ax = Axis(pos[1, 1]; xlabel = xlabel, ylabel = ylabel, title = title)
-    p = heatmap!(ax, x, y, z; colormap = binarysunset, colorrange, highclip)
+    p = heatmap!(ax, x, y, z; colormap = HEATMAP, colorrange, highclip)
     Colorbar(pos[1, 2], p; label = clabel, width = 12)
     return ax
 end
@@ -552,25 +530,35 @@ end
 begin # * τ_syn plane heatmaps — the (τ_r_e × τ_d_e) synaptic-filter plane, a (left) and b (right)
     τrlab = "τ_r_e  (E rise, ms)"
     τdlab = "τ_d_e  (E decay, ms)"
-    circuit_heatmap!(
-        gs[3], τr_lookup, τd_lookup, _A_td_full;
+    ax_td_a = circuit_heatmap!(
+        gs[3], τr_td, τd_td, A_td;
         xlabel = τrlab, ylabel = τdlab, title = "Circuit:  a", clabel = "a",
-        colorrange = (minimum(filter(isfinite, _A_td_full)), 1.0), highclip = binarysunset[end]
+        colorrange = (minimum(filter(!isnan, A_td)), 0.85), highclip = cgrad(HEATMAP)[end]   # a > 1 (fast-rise/slow-decay artefact) saturates to the top colormap colour
     )
-    circuit_heatmap!(
-        gs[4], τr_lookup, τd_lookup, _B_td_full;
+    ax_td_b = circuit_heatmap!(
+        gs[4], τr_td, τd_td, B_td;
         xlabel = τrlab, ylabel = τdlab, title = "Circuit:  b", clabel = "b"
     )
+    # Mark the default working-regime point on both τ_syn panels.
+    for ax in (ax_td_a, ax_td_b)
+        scatter!(
+            ax, [τr_0], [τd_0]; color = qinghai, markersize = 12,
+            strokecolor = :black, strokewidth = 0.8
+        )
+    end
 end
 
-# A matching hierarchy colorbar on each top panel keeps the two axes the
-# same pixel width — same data scale + same box geometry → genuinely fair
-# visual comparison between L2/3 and L6.
+# A matching categorical colorbar on each top panel keeps the two axes the same
+# pixel width (fair L2/3 ↔ L6 comparison) and doubles as the region legend: one
+# band per structure, ordered low → high hierarchy, with "Higher"/"Lower" ends.
+const _nreg = length(structures)
 for j in (1, 2)
     Colorbar(
-        gs[j][1, 2]; colormap = binarysunset, limits = hrange,
-        label = "Hierarchy score", width = 12
+        gs[j][1, 2]; colormap = region_colors, limits = (0, _nreg),
+        ticks = ((1:_nreg) .- 0.5, structures), width = 12
     )
+    Label(gs[j][1, 2, Top()], "Higher"; fontsize = 12, padding = (0, 0, -6, 0))
+    Label(gs[j][1, 2, Bottom()], "Lower"; fontsize = 12, padding = (0, 0, 0, 4))
 end
 
 addlabels!(f)
@@ -591,29 +579,29 @@ begin
     σlab = "σ_ee  (E→E spread)"
     # dg plane (δ × Δg_K)
     circuit_heatmap!(
-        gss[1], δ_coarse, gk_coarse, A_coarse;
+        gss[1], δ_lookup, gk_lookup, A_grid;
         xlabel = δlab, ylabel = gklab, title = "Circuit:  a", clabel = "a"
     )
     circuit_heatmap!(
-        gss[2], δ_coarse, gk_coarse, B_coarse;
+        gss[2], δ_lookup, gk_lookup, B_grid;
         xlabel = δlab, ylabel = gklab, title = "Circuit:  b", clabel = "b"
     )
     # ds plane (δ × σ_ee)
     circuit_heatmap!(
-        gss[3], δ_coarse, σ_coarse, A_ds_coarse;
+        gss[3], δ_lookup, σ_lookup, A_ds;
         xlabel = δlab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
     )
     circuit_heatmap!(
-        gss[4], δ_coarse, σ_coarse, B_ds_coarse;
+        gss[4], δ_lookup, σ_lookup, B_ds;
         xlabel = δlab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
     )
     # gs plane (Δg_K × σ_ee)
     circuit_heatmap!(
-        gss[5], gk_coarse, σ_coarse, A_gs_coarse;
+        gss[5], gk_lookup, σ_lookup, A_gs;
         xlabel = gklab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
     )
     circuit_heatmap!(
-        gss[6], gk_coarse, σ_coarse, B_gs_coarse;
+        gss[6], gk_lookup, σ_lookup, B_gs;
         xlabel = gklab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
     )
 end

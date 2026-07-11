@@ -44,7 +44,7 @@ begin # * Parameter planes: three 2-D planes through the default working-regime 
     parameter_vector = unique(vcat(vec(plane_dg), vec(plane_ds), vec(plane_gs)))
 
     tau_r_e = round.(range(0.5, 2.0, length = 31); sigdigits = 3)
-    tau_d_e = round.(range(2.0, 8.0, length = 25); sigdigits = 3)
+    tau_d_e = round.(range(2.5, 7.5, length = 25); sigdigits = 3)
     plane_td = vec([(; tau_r_e = tr, tau_d_e = td) for tr in tau_r_e, td in tau_d_e])
 
     isdir(path) || mkpath(path)
@@ -54,8 +54,10 @@ end
 # reduction kwargs, and the run-a-batch-then-save loop, so both sweep blocks below stay thin.
 savepath(p, seed) = joinpath(path, savename((; p..., seed = seed), "jld2"; connector))
 saved(p, seed) = isfile(savepath(p, seed))
-const RED = (; dt = dt_ms, arch, progress = true, scatter = :compacted,
-             mad_lags, psd_fmin, fano_taus, rate = true, transient = transient_steps)
+const RED = (;
+    dt = dt_ms, arch, progress = true, scatter = :compacted,
+    mad_lags, psd_fmin, fano_taus, rate = true, transient = transient_steps,
+)
 function run_and_save!(model, chunk, seed, deltas, dgks; member...)
     bs = simulate_batch(model, tmax, deltas, dgks; member..., RED...)
     for (i, c) in enumerate(chunk)
@@ -96,6 +98,28 @@ function save_member!(bs, i, c, seed)
     return wsave(savepath(c, seed), out)
 end
 
+begin # * τ_syn plane: (tau_r_e, tau_d_e) at the default point --- batched over the shared connectome
+    # One connectome per seed (sigma_ee = sigma_ee_0 fixed); the (N,B) batch co-executes B τ-cells as per-member
+    # excitatory-synapse overrides (`simulate_batch(; tau_r_e, tau_d_e)`), same cost profile as the other planes.
+    for seed in seeds
+        model = WRCircuit.Spatial(; key = seed)
+        remaining = filter(p -> !saved(p, seed), plane_td)
+        isempty(remaining) && continue
+        chunks = collect(Iterators.partition(remaining, B))
+        @info "τ_syn plane: seed $seed/$(length(seeds)) --- $(length(remaining)) cells in $(length(chunks)) batch(es)"
+        map(Chart(LogLogger(length(chunks))), chunks) do chunk
+            n = length(chunk)
+            run_and_save!(
+                model, chunk, seed, fill(delta_0, n), fill(Delta_g_K_0, n);
+                sigma_ee = sigma_ee_0, tau_r_e = [c.tau_r_e for c in chunk], tau_d_e = [c.tau_d_e for c in chunk]
+            )
+            nothing
+        end
+    end
+    nfiles = count(endswith(".jld2"), readdir(path))
+    @info "τ_syn plane done: $nfiles total result files in $path"
+end
+
 begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B) batch over (delta, Delta_g_K)
     for seed in seeds
         model = WRCircuit.Spatial(; key = seed)
@@ -115,24 +139,4 @@ begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B
     end
     nfiles = count(endswith(".jld2"), readdir(path))
     @info "Sweep done: $nfiles result files in $path"
-end
-
-begin # * τ_syn plane: (tau_r_e, tau_d_e) at the default point --- batched over the shared connectome
-    # One connectome per seed (sigma_ee = sigma_ee_0 fixed); the (N,B) batch co-executes B τ-cells as per-member
-    # excitatory-synapse overrides (`simulate_batch(; tau_r_e, tau_d_e)`), same cost profile as the other planes.
-    for seed in seeds
-        model = WRCircuit.Spatial(; key = seed)
-        remaining = filter(p -> !saved(p, seed), plane_td)
-        isempty(remaining) && continue
-        chunks = collect(Iterators.partition(remaining, B))
-        @info "τ_syn plane: seed $seed/$(length(seeds)) --- $(length(remaining)) cells in $(length(chunks)) batch(es)"
-        map(Chart(LogLogger(length(chunks))), chunks) do chunk
-            n = length(chunk)
-            run_and_save!(model, chunk, seed, fill(delta_0, n), fill(Delta_g_K_0, n);
-                          sigma_ee = sigma_ee_0, tau_r_e = [c.tau_r_e for c in chunk], tau_d_e = [c.tau_d_e for c in chunk])
-            nothing
-        end
-    end
-    nfiles = count(endswith(".jld2"), readdir(path))
-    @info "τ_syn plane done: $nfiles total result files in $path"
 end

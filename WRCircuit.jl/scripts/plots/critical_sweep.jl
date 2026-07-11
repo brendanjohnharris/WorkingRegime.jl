@@ -34,9 +34,6 @@ using AcademicClusters
 import ForwardDiff
 WRCircuit.@preamble
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Distributed workers — one grid cell (file load + neuron sweep) per Pmap task
-# ──────────────────────────────────────────────────────────────────────────────
 try
     begin # * Add procs and load code everywhere
         AcademicClusters.USydPhysics.distributeprocs(Inf; mem = "6GB", ncpus = 1)
@@ -58,9 +55,9 @@ try
     # WRCircuit, so workers pick them up via `@everywhere using WRCircuit`.
     neuron_step = 10
 
-    # ──────────────────────────────────────────────────────────────────────────────
-    # Index every result file, then build one 3-D (axis1, axis2, seed) grid per plane
-    # ──────────────────────────────────────────────────────────────────────────────
+    # Reject a heatmap parameter point (one (axis1, axis2) cell, across seed) unless at least this many
+    # of its seeds produced a sweep file; blanked points become empty vectors -> NaN in every heatmap.
+    N_REQUIRED = 5
 
     begin # * Index files by (delta, Delta_g_K, sigma_ee, seed) and lay out the three planes
         files = readdir(datadir("critical_sweep"), join = true)
@@ -135,6 +132,8 @@ try
         )
         utau_r = sort(unique(e.tau_r_e for e in tau_entries))
         utau_d = sort(unique(e.tau_d_e for e in tau_entries))
+        tau_r_e_0 = _snap(round(Float64(defaults[:tau_r_e]); sigdigits = 3), utau_r)
+        tau_d_e_0 = _snap(round(Float64(defaults[:tau_d_e]); sigdigits = 3), utau_d)
         tau_lookup = Dict((e.tau_r_e, e.tau_d_e, e.seed) => e.file for e in tau_entries)
         grid_td = map(
             collect(
@@ -145,6 +144,20 @@ try
         ) do (tr, td, seed)
             get(tau_lookup, (tr, td, seed), nothing)
         end
+        # Blank parameter points with too few sweep files: for each (axis1, axis2), if fewer than
+        # N_REQUIRED seeds have a file, drop the whole seed slice so the point is missing everywhere.
+        function require_samples!(grid, n_required)
+            a1, a2, _ = size(grid)
+            for i in 1:a1, j in 1:a2
+                count(!isnothing, @view grid[i, j, :]) < n_required && (grid[i, j, :] .= nothing)
+            end
+            return grid
+        end
+        require_samples!(grid_dg, N_REQUIRED)
+        require_samples!(grid_ds, N_REQUIRED)
+        require_samples!(grid_gs, N_REQUIRED)
+        require_samples!(grid_td, N_REQUIRED)
+
         @info "Plane cells (incl. seed): " *
             "dg $(count(!isnothing, grid_dg))/$(length(grid_dg)), " *
             "ds $(count(!isnothing, grid_ds))/$(length(grid_ds)), " *
@@ -208,6 +221,7 @@ try
             "delta" => udelta, "Delta_g_K" => ugk, "sigma_ee" => usigma, "seed" => useed,
             "tau_r_e" => utau_r, "tau_d_e" => utau_d,
             "delta_0" => delta_0, "Delta_g_K_0" => Delta_g_K_0, "sigma_ee_0" => sigma_ee_0,
+            "tau_r_e_0" => tau_r_e_0, "tau_d_e_0" => tau_d_e_0,
         )
         outfile = datadir("plots", "critical_sweep.jld2")
         wsave(outfile, out)
