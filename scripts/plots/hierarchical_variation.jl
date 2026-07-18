@@ -3,26 +3,6 @@
 #=
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-# Hierarchical variation figure.
-#
-# Layout (4 rows × 2 cols):
-#   Row 1    — the (a, b) plane at L2/3 (left) and L6 (right). Each carries the
-#              neuropixels scatter coloured categorically by region (ordered by
-#              anatomical hierarchy; see the per-panel colorbar legend), plus
-#              four mean-direction arrows sharing one origin in the top-right
-#              quadrant that show the local Jacobian directions of two forward
-#              maps at their canonical operating points:
-#                · circuit τ_syn (τ_r, τ_d) → (a, b) [green/orange], from critical_sweep.jld2;
-#                · bFNS theory (α, β) → (a, b)       [blue/red], from the flat bFNS sweep.
-#   Rows 2-4 — heatmaps for the three circuit forward-map planes, a (left) and b
-#              (right): (δ, Δg_K), (δ, σ_ee) and (Δg_K, σ_ee). Each cell is a
-#              per-neuron-exponent median pooled across the connectome seeds.
-#
-# Sources: WRExperiment.jl/data/plots/WRExperiment.jld2 (scatter; produced by
-# WRExperiment.jl/scripts/collect_calculations.jl),
-# WRCircuit.jl/data/plots/critical_sweep.jld2 (the three circuit planes + δ/Δg_K/σ_ee
-# arrows), and WRTheory.jl/data/bFNS_sweep/flat_γ=0.03_η=0.01.jld2 (α/β arrows).
-
 using DrWatson
 @quickactivate "WorkingRegime"
 using JLD2
@@ -44,24 +24,25 @@ const stim = "spontaneous"
 # Layer integer codes in the saved data: 2 = L2/3, 3 = L4, 4 = L5, 5 = L6.
 const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
 
-const DELTA_MIN = 4
-const DGK_MIN = 0.001
-const SIGMA_MIN = 0.06
-const SIGMA_MAX = 0.075
+# δ/τ_d plane ROI: framed on the L2/3 hierarchy path plus the working point (δ_0 = 4, τd_0 = 5). With the
+# estimator offset restored (A_OFFSET_DEMO) VISp sits near the working point and the hierarchy runs down to
+# lower δ (the shoulder), so the path traces right-to-left across the plane.
+const DELTA_MIN = 2.5
+const DELTA_MAX = 4.3
+const TAU_D_MIN = 4.0
+const TAU_D_MAX = 5.3
 
-const TAU_R_MIN = 0.5
-const TAU_R_MAX = 1.5
-const TAU_D_MIN = 3
-const TAU_D_MAX = 7
+# Provisional estimator-mismatch correction added to the *data* a before mapping. The data a (SM.send_madev)
+# is fit with an older MAPPLE than the circuit a (corrected today); this shifts the data onto the circuit's
+# estimator. ~0.1 is the scale of the differences we measured --- the definitive fix is re-fitting the data.
+const A_OFFSET_DEMO = 0.10
 
-# Span of the local window over which the τ_syn arrow directions are measured. The (τ_r, τ_d)
-# Jacobian is read across a window of this width centered on the green working point (τr_0, τd_0),
-# not across the whole heatmap ROI.
-const DELTA_TAU_R = 0.2
+# Span of the local window over which the circuit arrow directions are measured
+const DELTA_DELTA = 0.5
 const DELTA_TAU_D = 0.4
 
-# Draw the circuit τ_r / τ_d direction arrows on the (a, b) panels. Set false to show only the bFNS α/β arrows.
-const SHOW_TAU_ARROWS = false
+# Draw the circuit δ / τ_d direction arrows on the (a, b) panels. Set false to show only the bFNS α/β arrows.
+const SHOW_CIRCUIT_ARROWS = false
 
 # Shared origin of the direction arrows, in (a, b) data coordinates.
 const ARROW_ORIGIN = (0.55, -1.75)
@@ -183,67 +164,35 @@ function seed_pooled_median(cells)
     end
     return out
 end
-# Wrap the immediate-use map calls in `invokelatest` to satisfy Julia 1.12's
-# stricter world-age rules for global bindings defined at top-level.
-const _δ_lookup_full = circuit["delta"]
-const _gk_lookup_full = circuit["Delta_g_K"]
-const _σ_lookup_full = circuit["sigma_ee"]
-# Full-resolution per-cell median grids, one per plane (rows × cols):
-#   dg: (δ × Δg_K), ds: (δ × σ_ee), gs: (Δg_K × σ_ee).
-const _A_dg_full = Base.invokelatest(seed_pooled_median, circuit["a_dg"].data)
-const _B_dg_full = Base.invokelatest(seed_pooled_median, circuit["b_dg"].data)
-const _A_ds_full = Base.invokelatest(seed_pooled_median, circuit["a_ds"].data)
-const _B_ds_full = Base.invokelatest(seed_pooled_median, circuit["b_ds"].data)
-const _A_gs_full = Base.invokelatest(seed_pooled_median, circuit["a_gs"].data)
-const _B_gs_full = Base.invokelatest(seed_pooled_median, circuit["b_gs"].data)
-# td plane (τ_r_e × τ_d_e): the excitatory-synapse time-constant plane from the batched sweep. The heatmaps
-# are sliced to the TAU_R/TAU_D ROI while the arrows keep the full grid.
-const _A_td_full = Base.invokelatest(seed_pooled_median, circuit["a_td"].data)
-const _B_td_full = Base.invokelatest(seed_pooled_median, circuit["b_td"].data)
-const τr_lookup = collect(circuit["tau_r_e"])
-const τd_lookup = collect(circuit["tau_d_e"])
-# Heatmap ROI slice (τ_r rows, τ_d cols), same value-range idiom as the δ/Δg_K/σ_ee planes.
-const τr_keep = findall(v -> TAU_R_MIN <= v <= TAU_R_MAX, τr_lookup)
-const τd_keep = findall(v -> TAU_D_MIN <= v <= TAU_D_MAX, τd_lookup)
-const τr_td = τr_lookup[τr_keep]
-const τd_td = τd_lookup[τd_keep]
-# Default working-regime τ_syn point (Spatial model defaults, snapped to the grid).
-# Falls back to the known defaults if the sweep predates saving the anchor.
-const τr_0 = haskey(circuit, "tau_r_e_0") ? Float64(circuit["tau_r_e_0"]) : 1.0
+# δ/τ_d plane (delta × tau_d_e): the joint E/I-ratio × excitatory-decay plane, sliced to the δ ROI
+# (critical region through the working point) × the τ_d ROI. Reads its own lookups (dtd_delta, dtd_tau_d_e).
+# The map calls are wrapped in `invokelatest` for Julia 1.12's stricter world-age rules on top-level globals.
+const _A_dtd_full = Base.invokelatest(seed_pooled_median, circuit["a_dtd"].data)
+const _B_dtd_full = Base.invokelatest(seed_pooled_median, circuit["b_dtd"].data)
+const δ_dtd_lookup = collect(circuit["dtd_delta"])
+const τd_dtd_lookup = collect(circuit["dtd_tau_d_e"])
+const δ_dtd_keep = findall(v -> DELTA_MIN <= v <= DELTA_MAX, δ_dtd_lookup)
+const τd_dtd_keep = findall(v -> TAU_D_MIN <= v <= TAU_D_MAX, τd_dtd_lookup)
+const δ_dtd = δ_dtd_lookup[δ_dtd_keep]
+const τd_dtd = τd_dtd_lookup[τd_dtd_keep]
+# Default working-regime point (δ_0, τd_0) --- Spatial model defaults snapped to the grid;
+# falls back to the known defaults if the sweep predates saving the anchor.
+const δ_0 = haskey(circuit, "delta_0") ? Float64(circuit["delta_0"]) : 4.0
 const τd_0 = haskey(circuit, "tau_d_e_0") ? Float64(circuit["tau_d_e_0"]) : 5.0
-const A_td = _A_td_full[τr_keep, τd_keep]
-const B_td = _B_td_full[τr_keep, τd_keep]
+const A_dtd = _A_dtd_full[δ_dtd_keep, τd_dtd_keep]   # (δ × τ_d)
+const B_dtd = _B_dtd_full[δ_dtd_keep, τd_dtd_keep]
 
-# Slice each axis to its region of interest: δ > DELTA_MIN, Δg_K > DGK_MIN and
-# σ_ee ∈ [SIGMA_MIN, SIGMA_MAX]. Each plane uses the slices of its own two axes.
-const δ_keep = findall(>(DELTA_MIN), _δ_lookup_full)
-const gk_keep = findall(>(DGK_MIN), _gk_lookup_full)
-const σ_keep = findall(v -> SIGMA_MIN <= v <= SIGMA_MAX, _σ_lookup_full)
-const δ_lookup = _δ_lookup_full[δ_keep]
-const gk_lookup = _gk_lookup_full[gk_keep]
-const σ_lookup = _σ_lookup_full[σ_keep]
-const A_grid = _A_dg_full[δ_keep, gk_keep]   # dg plane (δ × Δg_K)
-const B_grid = _B_dg_full[δ_keep, gk_keep]
-const A_ds = _A_ds_full[δ_keep, σ_keep]      # ds plane (δ × σ_ee)
-const B_ds = _B_ds_full[δ_keep, σ_keep]
-const A_gs = _A_gs_full[gk_keep, σ_keep]     # gs plane (Δg_K × σ_ee)
-const B_gs = _B_gs_full[gk_keep, σ_keep]
-
-# Mean direction vectors of the circuit forward map in (a, b). Rather than
-# drawing full isolines, we summarise each knob's effect as a single net
-# displacement F(param_max) − F(param_min), averaged over the other parameter
-# to marginalise out the operating point.
-#
-# The circuit arrows read the τ_syn (τ_r_e, τ_d_e) plane --- the excitatory synaptic time constants, the
-# knobs that actually move the exponents (δ / Δg_K / σ_ee barely do; those planes are in the supplement).
-#   τ_r arrow: τ_r_e swept over the TAU_R ROI, averaged over the TAU_D ROI   (td plane)
-#   τ_d arrow: τ_d_e swept over the TAU_D ROI, averaged over the TAU_R ROI   (td plane)
+# Mean direction vectors of the circuit forward map in (a, b) on the δ/τ_d plane. Rather than
+# drawing full isolines, we summarise each knob's effect as a single net displacement
+# F(param_max) − F(param_min), averaged over the other parameter to marginalise out the operating point.
+#   δ arrow:   δ swept over the DELTA_DELTA window, averaged over the τ_d window
+#   τ_d arrow: τ_d swept over the DELTA_TAU_D window, averaged over the δ window
 # The fast-rise/slow-decay corner drives the 2-component MAD fit's first component past 1 (an artefact, not a
 # regime), so mask a > 1 to NaN; mean_direction skips those endpoint cells even though the sweep spans the ROI.
-const _td_bad = _A_td_full .> 1
-const _A_td_arrow = ifelse.(_td_bad, NaN, _A_td_full)
-const _B_td_arrow = ifelse.(_td_bad, NaN, _B_td_full)
-const τr_arrow_range = (τr_0 - DELTA_TAU_R / 2, τr_0 + DELTA_TAU_R / 2)   # window centered on the green working point
+const _dtd_bad = _A_dtd_full .> 1
+const _A_dtd_arrow = ifelse.(_dtd_bad, NaN, _A_dtd_full)
+const _B_dtd_arrow = ifelse.(_dtd_bad, NaN, _B_dtd_full)
+const δ_arrow_range = (δ_0 - DELTA_DELTA / 2, δ_0 + DELTA_DELTA / 2)   # window centered on the green working point
 const τd_arrow_range = (τd_0 - DELTA_TAU_D / 2, τd_0 + DELTA_TAU_D / 2)
 
 "Nearest grid index to a target value in a lookup vector."
@@ -254,7 +203,7 @@ _nearest(lookup, v) = argmin(abs.(lookup .- v))
 
 Net (Δa, Δb) displacement as the swept parameter goes from `sweep_range[1]` to
 `sweep_range[2]`, averaged over the `other` parameter restricted to `other_range`.
-`dim = 1` sweeps rows (δ), `dim = 2` sweeps columns (Δg_K).
+`dim = 1` sweeps rows, `dim = 2` sweeps columns.
 """
 function mean_direction(
         grid_a, grid_b, sweep_lookup, sweep_range,
@@ -279,13 +228,13 @@ function mean_direction(
     return (mean(da), mean(db))
 end
 
-const τr_dir = mean_direction(
-    _A_td_arrow, _B_td_arrow, τr_lookup, τr_arrow_range,
-    τd_lookup, τd_arrow_range; dim = 1
+const δ_dir = mean_direction(
+    _A_dtd_arrow, _B_dtd_arrow, δ_dtd_lookup, δ_arrow_range,
+    τd_dtd_lookup, τd_arrow_range; dim = 1
 )
 const τd_dir = mean_direction(
-    _A_td_arrow, _B_td_arrow, τd_lookup, τd_arrow_range,
-    τr_lookup, τr_arrow_range; dim = 2
+    _A_dtd_arrow, _B_dtd_arrow, τd_dtd_lookup, τd_arrow_range,
+    δ_dtd_lookup, δ_arrow_range; dim = 2
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -425,7 +374,7 @@ function plot_hero!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1
 
     # Mean-direction arrows, all sharing one origin fixed at ARROW_ORIGIN in (a, b)
     # data coordinates (plus an optional per-panel `arrow_offset` in data units).
-    # Two read the circuit forward map (τ_r, τ_d), two read the bFNS theory map (α, β).
+    # Two read the circuit forward map (δ, τ_d), two read the bFNS theory map (α, β).
     # We only care about the *angle*: each vector is normalised to display units (each
     # component ÷ its axis range) so it points along the direction read off the panel,
     # then drawn at a fixed length. Magnitude is discarded.
@@ -440,10 +389,10 @@ function plot_hero!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1
         return (u[1] / n * ra, u[2] / n * rb) .* arrow_len
     end
 
-    # All four arrows share the origin: synaptic time constants in green/orange,
+    # All four arrows share the origin: circuit knobs (δ, τ_d) in green/orange,
     # bFNS orders in blue/red. (vector, label, colour).
-    arrows = SHOW_TAU_ARROWS ? (
-            (scaled(τr_dir), "τ_r", qinghai),
+    arrows = SHOW_CIRCUIT_ARROWS ? (
+            (scaled(δ_dir), "δ", qinghai),
             (scaled(τd_dir), "τ_d", seohae),
             (scaled(α_dir), "α", baikal),
             (scaled(β_dir), "β", bermejo),
@@ -485,10 +434,10 @@ end
 # Figure: (a, b) scatters on top, then one heatmap row per circuit plane below
 # ──────────────────────────────────────────────────────────────────────────────
 
-f = FourPanel()   # main figure: (a, b) scatters (top) + the τ_syn heatmaps (bottom), 2×2 at 360×270 panel scale
+f = FourPanel()   # main figure: (a, b) scatters (top) + the δ/τ_d heatmaps (bottom), 2×2 at 360×270 panel scale
 
 # One sub-grid per panel; each holds [axis | colorbar] in its own columns. Row-major:
-# gs[1,2] = heroes (L2/3, L6); gs[3,4] = td (a, b). The δ/Δg_K/σ_ee planes move to the supplementary figure below.
+# gs[1,2] = heroes (L2/3, L6); gs[3,4] = δ/τ_d plane (a, b).
 gs = subdivide(f, 2, 2)
 
 begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
@@ -520,31 +469,52 @@ begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
 end
 
 "Draw one circuit forward-map heatmap (axis + colorbar) into sub-grid `pos`."
-function circuit_heatmap!(pos, x, y, z; xlabel, ylabel, title, clabel, colorrange = CairoMakie.Makie.automatic, highclip = CairoMakie.Makie.automatic)
+function circuit_heatmap!(pos, x, y, z; xlabel, ylabel, title, clabel, colorrange = CairoMakie.Makie.automatic, highclip = CairoMakie.Makie.automatic, lowclip = CairoMakie.Makie.automatic)
     ax = Axis(pos[1, 1]; xlabel = xlabel, ylabel = ylabel, title = title)
-    p = heatmap!(ax, x, y, z; colormap = HEATMAP, colorrange, highclip)
+    p = heatmap!(ax, x, y, z; colormap = HEATMAP, colorrange, highclip, lowclip)
     Colorbar(pos[1, 2], p; label = clabel, width = 12)
     return ax
 end
 
-begin # * τ_syn plane heatmaps — the (τ_r_e × τ_d_e) synaptic-filter plane, a (left) and b (right)
-    τrlab = "τ_r_e  (E rise, ms)"
+begin # * δ/τ_d plane heatmaps — the joint (δ × τ_d_e) plane, a (left) and b (right)
+    δlab = "δ  (I:E ratio)"
     τdlab = "τ_d_e  (E decay, ms)"
-    ax_td_a = circuit_heatmap!(
-        gs[3], τr_td, τd_td, A_td;
-        xlabel = τrlab, ylabel = τdlab, title = "Circuit:  a", clabel = "a",
-        colorrange = (minimum(filter(!isnan, A_td)), 0.85), highclip = cgrad(HEATMAP)[end]   # a > 1 (fast-rise/slow-decay artefact) saturates to the top colormap colour
+    ax_dtd_a = circuit_heatmap!(
+        gs[3], δ_dtd, τd_dtd, A_dtd;
+        xlabel = δlab, ylabel = τdlab, title = "Circuit:  a", clabel = "a",
+        colorrange = (0.5, 0.7), highclip = cgrad(HEATMAP)[end], lowclip = cgrad(HEATMAP)[1]
     )
-    ax_td_b = circuit_heatmap!(
-        gs[4], τr_td, τd_td, B_td;
-        xlabel = τrlab, ylabel = τdlab, title = "Circuit:  b", clabel = "b"
+    ax_dtd_b = circuit_heatmap!(
+        gs[4], δ_dtd, τd_dtd, B_dtd;
+        xlabel = δlab, ylabel = τdlab, title = "Circuit:  b", clabel = "b"
     )
-    # Mark the default working-regime point on both τ_syn panels.
-    for ax in (ax_td_a, ax_td_b)
-        scatter!(
-            ax, [τr_0], [τd_0]; color = qinghai, markersize = 12,
-            strokecolor = :black, strokewidth = 0.8
-        )
+    # Overlay the L2/3 hierarchy path: each area mapped to the (δ, τ_d) cell whose circuit (a, b) is closest
+    # to its measured (a, b) (data a shifted by A_OFFSET_DEMO onto the circuit's estimator), distance
+    # normalised by the data spans. Areas are joined in hierarchy order (low -> high); fill = area colour.
+    let aspan = scatterlimits[1][2] - scatterlimits[1][1], bspan = scatterlimits[2][2] - scatterlimits[2][1]
+        closest_dt = function (a_d, b_d)
+            best = (1, 1); bd = Inf
+            for i in eachindex(δ_dtd_lookup), j in eachindex(τd_dtd_lookup)
+                ac = _A_dtd_full[i, j]; bc = _B_dtd_full[i, j]
+                (isnan(ac) || isnan(bc)) && continue
+                dd = ((ac - a_d) / aspan)^2 + ((bc - b_d) / bspan)^2
+                dd < bd && (bd = dd; best = (i, j))
+            end
+            return (δ_dtd_lookup[best[1]], τd_dtd_lookup[best[2]])
+        end
+        mapped = [closest_dt(p.a + A_OFFSET_DEMO, p.b) for p in points_l23]
+        δpath = first.(mapped); τpath = last.(mapped)
+        cols = [structure_color[p.structure] for p in points_l23]
+        for ax in (ax_dtd_a, ax_dtd_b)
+            lines!(ax, δpath, τpath; color = (:black, 0.55), linewidth = 2)
+            scatter!(ax, δpath, τpath; color = cols, marker = :circle,
+                markersize = 15, strokecolor = :black, strokewidth = 1)
+        end
+    end
+    # Default working point (δ_0, τd_0) --- the circuit's nominal operating regime, for reference.
+    for ax in (ax_dtd_a, ax_dtd_b)
+        scatter!(ax, [δ_0], [τd_0]; color = :white, marker = :star5,
+            markersize = 22, strokecolor = :black, strokewidth = 1.5)
     end
 end
 
@@ -566,46 +536,3 @@ display(f)
 outfile = joinpath(outdir, "hierarchical_variation.pdf")
 wsave(outfile, f)
 @info "Saved $outfile"
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Supplementary figure: the three operating-point planes (δ, Δg_K, σ_ee) --- the knobs that barely move the
-# exponents (contrast the τ_syn plane in the main figure). One plane per row, a (left) and b (right).
-# ──────────────────────────────────────────────────────────────────────────────
-fs = SixPanel()   # 3 rows × 2 cols at 360×270 panel scale
-gss = subdivide(fs, 3, 2)
-begin
-    δlab = "δ  (I:E ratio)"
-    gklab = "Δg_K  (adaptation)"
-    σlab = "σ_ee  (E→E spread)"
-    # dg plane (δ × Δg_K)
-    circuit_heatmap!(
-        gss[1], δ_lookup, gk_lookup, A_grid;
-        xlabel = δlab, ylabel = gklab, title = "Circuit:  a", clabel = "a"
-    )
-    circuit_heatmap!(
-        gss[2], δ_lookup, gk_lookup, B_grid;
-        xlabel = δlab, ylabel = gklab, title = "Circuit:  b", clabel = "b"
-    )
-    # ds plane (δ × σ_ee)
-    circuit_heatmap!(
-        gss[3], δ_lookup, σ_lookup, A_ds;
-        xlabel = δlab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
-    )
-    circuit_heatmap!(
-        gss[4], δ_lookup, σ_lookup, B_ds;
-        xlabel = δlab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
-    )
-    # gs plane (Δg_K × σ_ee)
-    circuit_heatmap!(
-        gss[5], gk_lookup, σ_lookup, A_gs;
-        xlabel = gklab, ylabel = σlab, title = "Circuit:  a", clabel = "a"
-    )
-    circuit_heatmap!(
-        gss[6], gk_lookup, σ_lookup, B_gs;
-        xlabel = gklab, ylabel = σlab, title = "Circuit:  b", clabel = "b"
-    )
-end
-addlabels!(fs)
-suppfile = joinpath(outdir, "hierarchical_variation_supp.pdf")
-wsave(suppfile, fs)
-@info "Saved $suppfile"

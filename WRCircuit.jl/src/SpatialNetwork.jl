@@ -40,7 +40,8 @@ function build_spatial(;
         Delta_g_K = 0.002, tau_K = 40.0,
         seed = 0x05fd, arch::Dewdrop.AbstractArchitecture = DEWDROP_BACKEND(),
         T::Type{<:AbstractFloat} = Float32, index_type::Type{<:Integer} = Int32,
-        tspan = (0.0, 1.0), count_empty::Bool = true, shared_drive::Bool = true
+        tspan = (0.0, 1.0), count_empty::Bool = true, shared_drive::Bool = true,
+        weight_dist::Symbol = :gaussian, weight_cv::Real = 0.05
     )
     seed = UInt64(seed)
     # --- geometry: E on a cell-centred grid, I uniform-random, on a periodic [0,dx]² sheet ---
@@ -68,7 +69,7 @@ function build_spatial(;
     # into K --- `J_ie = J_ee·K_ee·δ/K_ie`, `J_ii = J_ei·K_ei·δ/K_ii`); sign carried by the reversal potential.
     J_ie = J_ee * K_ee * delta / K_ie
     J_ii = J_ei * K_ei * delta / K_ii
-    cw(J, tag) = Dewdrop.correlate_weights(J; seed = _subseed(seed, tag), count_empty = count_empty)
+    cw(J, tag) = Dewdrop.correlate_weights(J; jitter = weight_cv, dist = weight_dist, seed = _subseed(seed, tag), count_empty = count_empty)
     # --- builder: populations → four recurrent distance-fixed-count paths → external drive ---
     nb = Dewdrop.network(; tspan = tspan, arch = arch)
     Dewdrop.population!(nb, :E, E, NE; positions = posE)

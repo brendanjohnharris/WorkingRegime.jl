@@ -31,13 +31,14 @@ begin # * Sweep configuration
 end
 
 begin # * Parameter planes: three 2-D planes through the default working-regime point
-    delta = round.(range(3.5, 5, length = 31); sigdigits = 3)
+    delta = round.(range(2.5, 5, length = 51); sigdigits = 3)   # extended down to 2.5 (step 0.05 kept; old 3.5..5 hit exactly)
     Delta_g_K = round.(range(0, 0.005, length = 26); sigdigits = 3)
     sigma_ee = round.(range(0.03, 0.075, length = 19); sigdigits = 3)
 
     delta_0 = round(Float64(defaults[:delta]); sigdigits = 3)
     Delta_g_K_0 = round(Float64(defaults[:Delta_g_K]); sigdigits = 3)
     sigma_ee_0 = round(Float64(defaults[:sigma_ee]); sigdigits = 3)
+    tau_r_e_0 = round(Float64(defaults[:tau_r_e]); sigdigits = 3)
     plane_dg = [(; delta = d, Delta_g_K = gk, sigma_ee = sigma_ee_0) for d in delta, gk in Delta_g_K]
     plane_ds = [(; delta = d, Delta_g_K = Delta_g_K_0, sigma_ee = s) for d in delta, s in sigma_ee]
     plane_gs = [(; delta = delta_0, Delta_g_K = gk, sigma_ee = s) for gk in Delta_g_K, s in sigma_ee]
@@ -46,6 +47,7 @@ begin # * Parameter planes: three 2-D planes through the default working-regime 
     tau_r_e = round.(range(0.5, 2.0, length = 31); sigdigits = 3)
     tau_d_e = round.(range(2.5, 7.5, length = 25); sigdigits = 3)
     plane_td = vec([(; tau_r_e = tr, tau_d_e = td) for tr in tau_r_e, td in tau_d_e])
+    plane_dtd = vec([(; delta = d, tau_d_e = td) for d in delta, td in tau_d_e])   # δ × τ_d joint plane
 
     isdir(path) || mkpath(path)
 end
@@ -53,7 +55,24 @@ end
 # Shared run helpers: the resume path (defined once, used by both filters and `save_member!`), the fixed
 # reduction kwargs, and the run-a-batch-then-save loop, so both sweep blocks below stay thin.
 savepath(p, seed) = joinpath(path, savename((; p..., seed = seed), "jld2"; connector))
-saved(p, seed) = isfile(savepath(p, seed))
+# A result file is complete iff it carries all of these keys. `haskey` is a metadata lookup (nested paths
+# resolve), so this validates WITHOUT deserialising the arrays --- ~6 ms/file, ~5 min for a full resume scan.
+const REQUIRED_KEYS = ("parameters", "rate", "fano", "inputs/mad", "inputs/psd")
+_complete(f) = try
+    jldopen(g -> all(k -> haskey(g, k), REQUIRED_KEYS), f, "r")
+catch
+    false          # unreadable / truncated header
+end
+# Resume guard: skip a file only if it exists AND is complete. A present-but-truncated file (an interrupted
+# `wsave`) is DELETED here so the sweep regenerates it --- bare `isfile` would skip the stub forever.
+function saved(p, seed)
+    f = savepath(p, seed)
+    isfile(f) || return false
+    _complete(f) && return true
+    @warn "Incomplete sweep file (missing keys) --- deleting to regenerate" file = f
+    rm(f; force = true)
+    return false
+end
 const RED = (;
     dt = dt_ms, arch, progress = true, scatter = :compacted,
     mad_lags, psd_fmin, fano_taus, rate = true, transient = transient_steps,
@@ -118,6 +137,30 @@ begin # * τ_syn plane: (tau_r_e, tau_d_e) at the default point --- batched over
     end
     nfiles = count(endswith(".jld2"), readdir(path))
     @info "τ_syn plane done: $nfiles total result files in $path"
+end
+
+begin # * δ/τ_d plane: (delta, tau_d_e) at the default point --- batched over the shared connectome
+    # One connectome per seed (sigma_ee_0, tau_r_e_0 fixed). The (N,B) batch co-executes B (δ, τ_d) cells as
+    # per-member synapse overrides that COMPOSE: δ scales the inhibitory synapses (I→E, I→I; `simulate_batch(deltas)`)
+    # while τ_d sets the excitatory decay (E→E, E→I, drives; `simulate_batch(; tau_r_e, tau_d_e)`) --- disjoint
+    # projections, so both vary independently on one shared connectome. Saved as `delta=…&seed=…&tau_d_e=…`.
+    for seed in seeds
+        model = WRCircuit.Spatial(; key = seed)
+        remaining = filter(p -> !saved(p, seed), plane_dtd)
+        isempty(remaining) && continue
+        chunks = collect(Iterators.partition(remaining, B))
+        @info "δ/τ_d plane: seed $seed/$(length(seeds)) --- $(length(remaining)) cells in $(length(chunks)) batch(es)"
+        map(Chart(LogLogger(length(chunks))), chunks) do chunk
+            n = length(chunk)
+            run_and_save!(
+                model, chunk, seed, [c.delta for c in chunk], fill(Delta_g_K_0, n);
+                sigma_ee = sigma_ee_0, tau_r_e = fill(tau_r_e_0, n), tau_d_e = [c.tau_d_e for c in chunk]
+            )
+            nothing
+        end
+    end
+    nfiles = count(endswith(".jld2"), readdir(path))
+    @info "δ/τ_d plane done: $nfiles total result files in $path"
 end
 
 begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B) batch over (delta, Delta_g_K)

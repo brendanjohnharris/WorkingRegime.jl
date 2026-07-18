@@ -37,6 +37,7 @@ WRCircuit.@preamble
 try
     begin # * Add procs and load code everywhere
         AcademicClusters.USydPhysics.distributeprocs(Inf; mem = "6GB", ncpus = 1)
+        addprocs(16)
 
         @everywhere begin
             using WRCircuit
@@ -58,6 +59,11 @@ try
     # Reject a heatmap parameter point (one (axis1, axis2) cell, across seed) unless at least this many
     # of its seeds produced a sweep file; blanked points become empty vectors -> NaN in every heatmap.
     N_REQUIRED = 5
+
+    # Which planes to (re)compute. ONLY these are fit (the multi-hour cost) and written; every other plane
+    # already in critical_sweep.jld2 is preserved
+    PLANES = [:dtd] # [:dg, :ds, :gs, :td, :dtd]
+    want(p) = p in PLANES
 
     begin # * Index files by (delta, Delta_g_K, sigma_ee, seed) and lay out the three planes
         files = readdir(datadir("critical_sweep"), join = true)
@@ -144,6 +150,28 @@ try
         ) do (tr, td, seed)
             get(tau_lookup, (tr, td, seed), nothing)
         end
+        # δ/τ_d plane: (delta, tau_d_e, seed) --- these files carry delta + tau_d_e but no
+        # Delta_g_K/sigma_ee/tau_r_e, so both filters above drop them; index them here into a 5th grid.
+        dtd_entries = filter(
+            !isnothing, map(files) do f
+                fname = parse_savename(f; connector = string(connector))[2]
+                needed = ("delta", "tau_d_e", "seed")
+                (haskey(fname, "key") || !all(k -> haskey(fname, k), needed) || haskey(fname, "Delta_g_K")) && return nothing
+                return (; file = f, delta = fname["delta"], tau_d_e = fname["tau_d_e"], seed = Int(fname["seed"]))
+            end
+        )
+        udtd_delta = sort(unique(e.delta for e in dtd_entries))
+        udtd_tau_d = sort(unique(e.tau_d_e for e in dtd_entries))
+        dtd_lookup = Dict((e.delta, e.tau_d_e, e.seed) => e.file for e in dtd_entries)
+        grid_dtd = map(
+            collect(
+                Iterators.product(
+                    Dim{:delta}(udtd_delta), Dim{:tau_d_e}(udtd_tau_d), Dim{:seed}(useed)
+                )
+            )
+        ) do (d, td, seed)
+            get(dtd_lookup, (d, td, seed), nothing)
+        end
         # Blank parameter points with too few sweep files: for each (axis1, axis2), if fewer than
         # N_REQUIRED seeds have a file, drop the whole seed slice so the point is missing everywhere.
         function require_samples!(grid, n_required)
@@ -157,12 +185,14 @@ try
         require_samples!(grid_ds, N_REQUIRED)
         require_samples!(grid_gs, N_REQUIRED)
         require_samples!(grid_td, N_REQUIRED)
+        require_samples!(grid_dtd, N_REQUIRED)
 
         @info "Plane cells (incl. seed): " *
             "dg $(count(!isnothing, grid_dg))/$(length(grid_dg)), " *
             "ds $(count(!isnothing, grid_ds))/$(length(grid_ds)), " *
             "gs $(count(!isnothing, grid_gs))/$(length(grid_gs)), " *
-            "td $(count(!isnothing, grid_td))/$(length(grid_td)); " *
+            "td $(count(!isnothing, grid_td))/$(length(grid_td)), " *
+            "dtd $(count(!isnothing, grid_dtd))/$(length(grid_dtd)); " *
             "anchors delta_0=$delta_0, Delta_g_K_0=$Delta_g_K_0, sigma_ee_0=$sigma_ee_0"
     end
 
@@ -182,50 +212,64 @@ try
         end
     end
 
-    begin # * Fit exponents across all three planes (per-neuron, per-seed)
-        @info "Fitting diffusion exponents (MAPPLE to MAD)..."
-        @info "a_dg"
-        a_dg = fit_grid(grid_dg, "inputs/mad", diffusion_exponents; step = neuron_step)
-        @info "a_ds"
-        a_ds = fit_grid(grid_ds, "inputs/mad", diffusion_exponents; step = neuron_step)
-        @info "a_gs"
-        a_gs = fit_grid(grid_gs, "inputs/mad", diffusion_exponents; step = neuron_step)
-
-        @info "Fitting spectral exponents (MAPPLE to PSD)..."
-        @info "b_dg"
-        b_dg = fit_grid(grid_dg, "inputs/psd", spectral_exponents; step = neuron_step)
-        @info "b_ds"
-        b_ds = fit_grid(grid_ds, "inputs/psd", spectral_exponents; step = neuron_step)
-        @info "b_gs"
-        b_gs = fit_grid(grid_gs, "inputs/psd", spectral_exponents; step = neuron_step)
-
-        @info "a_td"
-        a_td = fit_grid(grid_td, "inputs/mad", diffusion_exponents; step = neuron_step)
-        @info "b_td"
-        b_td = fit_grid(grid_td, "inputs/psd", spectral_exponents; step = neuron_step)
+    begin # * Fit exponents for the SELECTED planes only (per-neuron, per-seed). `a` = diffusion (MAPPLE to
+        # MAD), `b` = spectral (MAPPLE to PSD). Each `fit_grid` is the expensive step, so unselected planes
+        # are skipped and their existing exponents are kept by the merge on save.
+        if want(:dg)
+            @info "fitting a_dg/b_dg";   a_dg = fit_grid(grid_dg, "inputs/mad", diffusion_exponents; step = neuron_step); b_dg = fit_grid(grid_dg, "inputs/psd", spectral_exponents; step = neuron_step)
+        end
+        if want(:ds)
+            @info "fitting a_ds/b_ds";   a_ds = fit_grid(grid_ds, "inputs/mad", diffusion_exponents; step = neuron_step); b_ds = fit_grid(grid_ds, "inputs/psd", spectral_exponents; step = neuron_step)
+        end
+        if want(:gs)
+            @info "fitting a_gs/b_gs";   a_gs = fit_grid(grid_gs, "inputs/mad", diffusion_exponents; step = neuron_step); b_gs = fit_grid(grid_gs, "inputs/psd", spectral_exponents; step = neuron_step)
+        end
+        if want(:td)
+            @info "fitting a_td/b_td";   a_td = fit_grid(grid_td, "inputs/mad", diffusion_exponents; step = neuron_step); b_td = fit_grid(grid_td, "inputs/psd", spectral_exponents; step = neuron_step)
+        end
+        if want(:dtd)
+            @info "fitting a_dtd/b_dtd"; a_dtd = fit_grid(grid_dtd, "inputs/mad", diffusion_exponents; step = neuron_step); b_dtd = fit_grid(grid_dtd, "inputs/psd", spectral_exponents; step = neuron_step)
+        end
     end
 
     # ──────────────────────────────────────────────────────────────────────────────
     # Save (per-neuron exponents only; seed kept as the trailing axis of every grid)
     # ──────────────────────────────────────────────────────────────────────────────
 
-    begin # * Save
+    begin # * Save --- MERGE into critical_sweep.jld2: only the planes computed this run are (over)written;
+        # every other plane already in the file is loaded and kept. Each grid stays (axis1, axis2, seed) of
+        # per-neuron exponent vectors, alongside its own axis lookups (+ anchors for the main δ planes).
         mkpath(datadir("plots"))
-        out = Dict(
-            # Each grid is (axis1, axis2, seed) of per-neuron exponent vectors.
-            "a_dg" => a_dg, "b_dg" => b_dg,   # dg plane: (delta, Delta_g_K) at sigma_ee_0
-            "a_ds" => a_ds, "b_ds" => b_ds,   # ds plane: (delta, sigma_ee)  at Delta_g_K_0
-            "a_gs" => a_gs, "b_gs" => b_gs,   # gs plane: (Delta_g_K, sigma_ee) at delta_0
-            "a_td" => a_td, "b_td" => b_td,   # td plane: (tau_r_e, tau_d_e) at the default point
-            # Shared axis lookups + the plane anchors (the default working-regime point).
-            "delta" => udelta, "Delta_g_K" => ugk, "sigma_ee" => usigma, "seed" => useed,
-            "tau_r_e" => utau_r, "tau_d_e" => utau_d,
-            "delta_0" => delta_0, "Delta_g_K_0" => Delta_g_K_0, "sigma_ee_0" => sigma_ee_0,
-            "tau_r_e_0" => tau_r_e_0, "tau_d_e_0" => tau_d_e_0,
-        )
         outfile = datadir("plots", "critical_sweep.jld2")
-        wsave(outfile, out)
-        @info "Saved $outfile"
+        merged = isfile(outfile) ? load(outfile) : Dict{String, Any}()
+        if want(:dg)
+            merged["a_dg"] = a_dg; merged["b_dg"] = b_dg
+        end
+        if want(:ds)
+            merged["a_ds"] = a_ds; merged["b_ds"] = b_ds
+        end
+        if want(:gs)
+            merged["a_gs"] = a_gs; merged["b_gs"] = b_gs
+        end
+        if want(:td)
+            merged["a_td"] = a_td; merged["b_td"] = b_td
+        end
+        if want(:dtd)
+            merged["a_dtd"] = a_dtd; merged["b_dtd"] = b_dtd
+        end
+        # Refresh only the axis lookups / anchors tied to the planes just computed (each plane owns its axes).
+        if want(:dg) || want(:ds) || want(:gs)
+            merged["delta"] = udelta; merged["Delta_g_K"] = ugk; merged["sigma_ee"] = usigma; merged["seed"] = useed
+            merged["delta_0"] = delta_0; merged["Delta_g_K_0"] = Delta_g_K_0; merged["sigma_ee_0"] = sigma_ee_0
+        end
+        if want(:td)
+            merged["tau_r_e"] = utau_r; merged["tau_d_e"] = utau_d; merged["tau_r_e_0"] = tau_r_e_0; merged["tau_d_e_0"] = tau_d_e_0
+        end
+        if want(:dtd)
+            merged["dtd_delta"] = udtd_delta; merged["dtd_tau_d_e"] = udtd_tau_d
+        end
+        wsave(outfile, merged)
+        @info "Saved $outfile (planes computed: $PLANES)"
     end
 finally
     rmprocs()
