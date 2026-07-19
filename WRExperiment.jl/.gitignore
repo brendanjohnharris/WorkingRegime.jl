@@ -1,0 +1,24 @@
+*.code-workspace
+*.mp4
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+*.jld2
+*.mat
+*.parquet
+.CondaPkg/
+.vscode
+/docs/Manifest.toml
+/docs/build/
+Artifacts.toml
+LocalPreferences.toml
+data*/
+data
+docsb/build/
+docs/site/
+/plots*/
+logs/
+cache/
+test/
+Manifest copy.toml
+.claude/
