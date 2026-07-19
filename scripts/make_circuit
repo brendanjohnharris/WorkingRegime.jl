@@ -3,5 +3,5 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # * You really will need to run this on a cluster with high mem (120 GB) and a good GPU (l40). It will take a few days to run.
-chmod u+x $PROJECT_DIR/WRCircuit.jl/scripts/plots/*
-"$PROJECT_DIR/WRCircuit.jl/scripts/calculations/critical_demo.jl"
+chmod u+x $PROJECT_DIR/WRCircuit/scripts/plots/*
+"$PROJECT_DIR/WRCircuit/scripts/calculations/critical_demo.jl"

@@ -2,6 +2,6 @@
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-chmod u+x $PROJECT_DIR/WRExperiment.jl/scripts/plots/*
-"$PROJECT_DIR/WRExperiment.jl/scripts/run_calculations.jl"
-"$PROJECT_DIR/WRExperiment.jl/scripts/collect_calculations.jl"
+chmod u+x $PROJECT_DIR/WRExperiment/scripts/plots/*
+"$PROJECT_DIR/WRExperiment/scripts/run_calculations.jl"
+"$PROJECT_DIR/WRExperiment/scripts/collect_calculations.jl"

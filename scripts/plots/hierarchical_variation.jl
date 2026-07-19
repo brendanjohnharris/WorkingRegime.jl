@@ -24,18 +24,13 @@ const stim = "spontaneous"
 # Layer integer codes in the saved data: 2 = L2/3, 3 = L4, 4 = L5, 5 = L6.
 const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
 
-# δ/τ_d plane ROI: framed on the L2/3 hierarchy path plus the working point (δ_0 = 4, τd_0 = 5). With the
-# estimator offset restored (A_OFFSET_DEMO) VISp sits near the working point and the hierarchy runs down to
-# lower δ (the shoulder), so the path traces right-to-left across the plane.
+# δ/τ_d plane ROI: framed on the L2/3 hierarchy path plus the working point (δ_0 = 4, τd_0 = 5). The data a/b
+# now use the same MAPPLE estimator as the circuit (WRExperiment.diffusion_fit/mapple_fit), so no offset
+# correction is applied. Re-tune these bounds if the regenerated data lands elsewhere.
 const DELTA_MIN = 2.5
 const DELTA_MAX = 4.3
 const TAU_D_MIN = 4.0
 const TAU_D_MAX = 5.3
-
-# Provisional estimator-mismatch correction added to the *data* a before mapping. The data a (SM.send_madev)
-# is fit with an older MAPPLE than the circuit a (corrected today); this shifts the data onto the circuit's
-# estimator. ~0.1 is the scale of the differences we measured --- the definitive fix is re-fitting the data.
-const A_OFFSET_DEMO = 0.10
 
 # Span of the local window over which the circuit arrow directions are measured
 const DELTA_DELTA = 0.5
@@ -133,7 +128,7 @@ end
 # Load aggregated experiment data
 # ──────────────────────────────────────────────────────────────────────────────
 
-const inpath = projectdir("WRExperiment.jl", "data", "plots", "WRExperiment.jld2")
+const inpath = projectdir("WRExperiment", "data", "plots", "WRExperiment.jld2")
 plot_data = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), inpath;
     typemap = _toolsarray_typemap
@@ -142,7 +137,7 @@ plot_data = jldopen(
 # Circuit per-neuron exponent grids — three planes through the working-regime
 # point, each saved as (axis₁, axis₂, seed) of per-neuron exponent vectors. We
 # pool seed + neuron to a per-cell median for the heatmaps and the arrows.
-const circuit_path = projectdir("WRCircuit.jl", "data", "plots", "critical_sweep.jld2")
+const circuit_path = projectdir("WRCircuit", "data", "plots", "critical_sweep.jld2")
 circuit = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), circuit_path;
     typemap = _toolsarray_typemap
@@ -241,7 +236,7 @@ const τd_dir = mean_direction(
 # bFNS theory sweep — (α, β) → (a, b) direction arrows
 #
 # The flat (unconfined) sweep is the same grid behind the theory figure's
-# (α, β) → (a, b) heatmaps: WRTheory.jl/data/bFNS_sweep/flat_γ=0.03_η=0.01.jld2
+# (α, β) → (a, b) heatmaps: WRTheory/data/bFNS_sweep/flat_γ=0.03_η=0.01.jld2
 # holds `diffusion_exponent` and `spectral_exponent` as ToolsArrays over
 # (α, β, γ, η, Obs). We NaN-aware average over the Obs seeds (and the singleton
 # γ, η axes) to get 2-D (α, β) exponent grids, then reuse `mean_direction` to read
@@ -249,7 +244,7 @@ const τd_dir = mean_direction(
 # ──────────────────────────────────────────────────────────────────────────────
 
 const bfns_path = projectdir(
-    "WRTheory.jl", "data", "bFNS_sweep", "flat_γ=0.03_η=0.01.jld2"
+    "WRTheory", "data", "bFNS_sweep", "flat_γ=0.03_η=0.01.jld2"
 )
 bfns = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), bfns_path;
@@ -489,8 +484,8 @@ begin # * δ/τ_d plane heatmaps — the joint (δ × τ_d_e) plane, a (left) an
         xlabel = δlab, ylabel = τdlab, title = "Circuit:  b", clabel = "b"
     )
     # Overlay the L2/3 hierarchy path: each area mapped to the (δ, τ_d) cell whose circuit (a, b) is closest
-    # to its measured (a, b) (data a shifted by A_OFFSET_DEMO onto the circuit's estimator), distance
-    # normalised by the data spans. Areas are joined in hierarchy order (low -> high); fill = area colour.
+    # to its measured (a, b) (data now uses the same MAPPLE estimator as the circuit), distance normalised
+    # by the data spans. Areas are joined in hierarchy order (low -> high); fill = area colour.
     let aspan = scatterlimits[1][2] - scatterlimits[1][1], bspan = scatterlimits[2][2] - scatterlimits[2][1]
         closest_dt = function (a_d, b_d)
             best = (1, 1); bd = Inf
@@ -502,19 +497,23 @@ begin # * δ/τ_d plane heatmaps — the joint (δ × τ_d_e) plane, a (left) an
             end
             return (δ_dtd_lookup[best[1]], τd_dtd_lookup[best[2]])
         end
-        mapped = [closest_dt(p.a + A_OFFSET_DEMO, p.b) for p in points_l23]
+        mapped = [closest_dt(p.a, p.b) for p in points_l23]
         δpath = first.(mapped); τpath = last.(mapped)
         cols = [structure_color[p.structure] for p in points_l23]
         for ax in (ax_dtd_a, ax_dtd_b)
             lines!(ax, δpath, τpath; color = (:black, 0.55), linewidth = 2)
-            scatter!(ax, δpath, τpath; color = cols, marker = :circle,
-                markersize = 15, strokecolor = :black, strokewidth = 1)
+            scatter!(
+                ax, δpath, τpath; color = cols, marker = :circle,
+                markersize = 15, strokecolor = :black, strokewidth = 1
+            )
         end
     end
     # Default working point (δ_0, τd_0) --- the circuit's nominal operating regime, for reference.
     for ax in (ax_dtd_a, ax_dtd_b)
-        scatter!(ax, [δ_0], [τd_0]; color = :white, marker = :star5,
-            markersize = 22, strokecolor = :black, strokewidth = 1.5)
+        scatter!(
+            ax, [δ_0], [τd_0]; color = :white, marker = :star5,
+            markersize = 22, strokecolor = :black, strokewidth = 1.5
+        )
     end
 end
 

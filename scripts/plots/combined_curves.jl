@@ -98,14 +98,14 @@ function _select(x::NamedArray, selectors::Pair...)
 end
 
 # Load experiment data
-inpath = projectdir("WRExperiment.jl", "data", "plots", "WRExperiment.jld2")
+inpath = projectdir("WRExperiment", "data", "plots", "WRExperiment.jld2")
 plot_data = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), inpath;
     typemap = _toolsarray_typemap
 )
 
 # Load circuit data
-circuit_path = projectdir("WRCircuit.jl", "data", "plots", "circuit_curves.jld2")
+circuit_path = projectdir("WRCircuit", "data", "plots", "circuit_curves.jld2")
 circuit = load(circuit_path, "circuit_curves")
 
 outdir = plotsdir("combined_curves")
@@ -209,9 +209,9 @@ for stim_str in stimuli_str
         #     align=(:center, :bottom), color=:black, rotation=0,
         #     fontsize=16, offset=(0, 5))
 
-        # FOOOF fit line
+        # MAPPLE fit line
         lines!(
-            ax, psd.f, exp10.(normalize(log10.(psd.fooof)));
+            ax, psd.f, exp10.(normalize(log10.(psd.mapple)));
             color = experiment_color,
             linestyle = :dash
         )

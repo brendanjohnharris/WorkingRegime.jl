@@ -1,1 +1,0 @@
-Please place SpatiotemporalMotifs datadir in this projects data/ folder.

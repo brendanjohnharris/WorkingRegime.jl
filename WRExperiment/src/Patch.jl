@@ -369,8 +369,10 @@ const connector = "&"
 const structures = ["VISp", "VISl", "VISrl", "VISal", "VISpm", "VISam"]
 const layers = ["1", "2/3", "4", "5", "6"]
 const PTHR = 1.0e-2
-const hierarchy_scores = Dict("VISp" => -0.357, "VISl" => -0.093, "VISrl" => -0.059,
-    "VISal" => 0.152, "VISpm" => 0.327, "VISam" => 0.441)  # anatomical hierarchy, Siegle 2021
+const hierarchy_scores = Dict(
+    "VISp" => -0.357, "VISl" => -0.093, "VISrl" => -0.059,
+    "VISal" => 0.152, "VISpm" => 0.327, "VISam" => 0.441
+)  # anatomical hierarchy, Siegle 2021
 THETA() = (3, 10)   # SM used a preference-overridable getpref; WRExperiment just needs the defaults
 GAMMA() = (30, 100)
 CLUSTER() = get(ENV, "SM_CLUSTER", "false") == "true"   # are we running on the cluster?
@@ -393,12 +395,14 @@ end
 has_keys(D, required_keys) = all(haskey.([D], required_keys))
 
 # bootstrapmedian is reused from TimeseriesTools (BCa CI via its BootstrapExt, active since we load Bootstrap);
-# re-exported from WRExperiment.jl. Returns (; average, confint=(; lower, upper)) --- destructures as μ,(σl,σh).
+# re-exported from WRExperiment. Returns (; average, confint=(; lower, upper)) --- destructures as μ,(σl,σh).
 
 # Hierarchy correlation (Kendall τ vs anatomical hierarchy), vendored from SpatiotemporalMotifs. Used by
 # collect_calculations (diffusion_hierarchical) and madev. Bootstrap.jl → BCa CIs; permutation p-values.
-function hierarchicalkendall(x::AbstractVector{<:Real}, y::AbstractDimArray,
-        mode::Symbol = :group; kwargs...)
+function hierarchicalkendall(
+        x::AbstractVector{<:Real}, y::AbstractDimArray,
+        mode::Symbol = :group; kwargs...
+    )
     hasdim(y, Depth) || throw(ArgumentError("Argument 2 should have a Depth dimension"))
     hasdim(y, SessionID) || throw(ArgumentError("Argument 2 should have a SessionID dimension"))
     hasdim(y, Structure) || throw(ArgumentError("Argument 2 should have a Structure dimension"))

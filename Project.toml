@@ -4,7 +4,7 @@ version = "1.0.0-DEV"
 authors = ["brendanjohnharris <bhar9988@uni.sydney.edu.au> and contributors"]
 
 [workspace]
-projects = ["WRCircuit.jl"]
+projects = ["WRCircuit, WRExperiment", "WRTheory"]
 
 [deps]
 AcademicClusters = "0d53aa51-fded-4285-958f-a79747f7b7b4"
@@ -17,6 +17,7 @@ TimeseriesTools = "380cddd1-6ef2-46ca-b087-e7151fb095ff"
 
 [sources]
 Fathom = {rev = "main", url = "https://github.com/brendanjohnharris/Fathom.jl"}
+TimeseriesTools = {path="../../TimeseriesTools.jl"}
 
 [extras]
 CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
