@@ -15,7 +15,7 @@ using StatsBase: Histogram, merge!   # `fit` comes in via @preamble (shared Stat
 using Logging, TerminalLoggers       # for the scoped progress-bar logger (with_logger) in the simulate block
 WRCircuit.@preamble
 set_theme!(fathom(:physics))
-outfile = datadir("critical_demo.jld2")
+outfile = datadir("demo_run.jld2")
 
 begin
     model = WRCircuit.models.Spatial

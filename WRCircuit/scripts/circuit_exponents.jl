@@ -5,7 +5,7 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 # Critical sweep — exponent extraction.
 #
-# The sweep (scripts/calculations/critical_sweep.jl) is THREE intersecting 2-D
+# The sweep (scripts/calculations/circuit_sweep.jl) is THREE intersecting 2-D
 # planes through the default working-regime point, each run over 5 connectome
 # seeds:
 #   - dg plane: (delta, Delta_g_K) at sigma_ee = sigma_ee_0
@@ -13,14 +13,9 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 #   - gs plane: (Delta_g_K, sigma_ee) at delta = delta_0
 # For each plane we fit the per-neuron diffusion exponent (from the input MAD) and
 # spectral exponent (from the input PSD) and save *all* per-neuron exponents (not
-# neuron-averages) to data/plots/critical_sweep.jld2, KEEPING THE SEED AXIS
+# neuron-averages) to data/circuit_exponents.jld2, KEEPING THE SEED AXIS
 # EXPLICIT: every saved grid is (axis1, axis2, seed) of per-neuron exponent
 # vectors, so downstream scripts collapse the seed 'Obs' dimension as they wish.
-#
-# The fitting recipe follows scripts/plots/_critical_sweep.jl: the diffusion
-# exponent is the first component of a 2-component MAPPLE fit to the MAD curve;
-# the spectral exponent is the last component of a 1-component fit to the
-# 10-1000 Hz PSD.
 
 using DrWatson
 DrWatson.@quickactivate :WRCircuit
@@ -61,12 +56,12 @@ try
     N_REQUIRED = 5
 
     # Which planes to (re)compute. ONLY these are fit (the multi-hour cost) and written; every other plane
-    # already in critical_sweep.jld2 is preserved
+    # already in circuit_sweep.jld2 is preserved
     PLANES = [:dtd] # [:dg, :ds, :gs, :td, :dtd]
     want(p) = p in PLANES
 
     begin # * Index files by (delta, Delta_g_K, sigma_ee, seed) and lay out the three planes
-        files = readdir(datadir("critical_sweep"), join = true)
+        files = readdir(datadir("circuit_sweep"), join = true)
         entries = map(files) do f
             fname = parse_savename(f; connector = string(connector))[2]
             needed = ("delta", "Delta_g_K", "sigma_ee", "seed")
@@ -236,11 +231,11 @@ try
     # Save (per-neuron exponents only; seed kept as the trailing axis of every grid)
     # ──────────────────────────────────────────────────────────────────────────────
 
-    begin # * Save --- MERGE into critical_sweep.jld2: only the planes computed this run are (over)written;
+    begin # * Save --- MERGE into circuit_exponents.jld2: only the planes computed this run are (over)written;
         # every other plane already in the file is loaded and kept. Each grid stays (axis1, axis2, seed) of
         # per-neuron exponent vectors, alongside its own axis lookups (+ anchors for the main δ planes).
         mkpath(datadir("plots"))
-        outfile = datadir("plots", "critical_sweep.jld2")
+        outfile = datadir("circuit_exponents.jld2")
         merged = isfile(outfile) ? load(outfile) : Dict{String, Any}()
         if want(:dg)
             merged["a_dg"] = a_dg; merged["b_dg"] = b_dg

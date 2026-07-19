@@ -19,7 +19,7 @@ set_theme!(Fathom.fathom(:physics))
 
 begin
     @info "Loading data"
-    rawfile = datadir("critical_demo.jld2")   # now holds only the last 5 s of raw traces + scalars
+    rawfile = datadir("demo_run.jld2")   # now holds only the last 5 s of raw traces + scalars
     fixed_params = load(rawfile, "fixed_params")
     epositions = load(rawfile, "epositions")
     ipositions = load(rawfile, "ipositions")
@@ -366,7 +366,7 @@ function zigg!(ax, h; color = baikal, logy = false, dropfirst = logy)
     barplot!(ax, c, p; width = w, gap = 0, color = (color, 0.5), strokewidth = 0)
     ys = Float64.([p; last(p)])
     logy && (ys[ys .<= 0] .= NaN)
-    stairs!(ax, e, ys; step = :post, color = color)
+    return stairs!(ax, e, ys; step = :post, color = color)
 end
 
 begin # * Additional properties: image and distribution fit

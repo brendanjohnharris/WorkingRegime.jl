@@ -10,7 +10,7 @@ const _preamble = quote
     using ComplexityMeasures
     using CairoMakie
     using TimeseriesMakie
-    using Foresight
+    using Fathom
     using MoreMaps
     using StatsBase
     using FractionalNeuralSampling
@@ -23,7 +23,7 @@ const _preamble = quote
 end
 Base.eval(WRTheory, _preamble)
 macro preamble()
-    _preamble
+    return _preamble
 end
 
 plotdir(args...) = projectdir("plots", args...)

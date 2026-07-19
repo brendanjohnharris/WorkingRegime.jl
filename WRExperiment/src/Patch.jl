@@ -3,7 +3,7 @@ import AllenNeuropixelsBase as AN
 using Unitful
 using Makie
 using LinearAlgebra
-using Foresight
+using Fathom
 using StatsBase
 
 import DataFrames: DataFrame, innerjoin
@@ -386,7 +386,7 @@ macro preamble()
         using Suppressor
         import AllenNeuropixelsBase as AN
         using Statistics, StatsBase, Random, LinearAlgebra, Unitful, FileIO
-        using CairoMakie, DataFrames, DimensionalData, DrWatson, Foresight, Peaks
+        using CairoMakie, DataFrames, DimensionalData, DrWatson, Fathom, Peaks
         using IntervalSets, Distributed, JLD2, HypothesisTests, MultipleTesting
         using ProgressLogging, TimeseriesTools
         using WRExperiment

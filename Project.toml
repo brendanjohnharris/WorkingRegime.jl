@@ -1,10 +1,9 @@
 name = "WorkingRegime"
-uuid = "a2fb53ce-e249-4e8c-8865-d217552c1552"
-version = "1.0.0-DEV"
+version = "0.1.0"
 authors = ["brendanjohnharris <bhar9988@uni.sydney.edu.au> and contributors"]
 
 [workspace]
-projects = ["WRCircuit, WRExperiment", "WRTheory"]
+projects = ["WRCircuit", "WRExperiment", "WRTheory"]
 
 [deps]
 AcademicClusters = "0d53aa51-fded-4285-958f-a79747f7b7b4"
@@ -13,11 +12,27 @@ DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DrWatson = "634d3b9d-ee7a-5ddf-bec9-22491ea816e1"
 Fathom = "05518021-a905-466c-bf96-cf0c89e1b0a0"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+MoreMaps = "d6ea422f-1f55-4be1-bfc3-e7c09aa4d855"
+TimeseriesMakie = "5e3e9a77-7bbf-480c-931c-0802e2453f5a"
 TimeseriesTools = "380cddd1-6ef2-46ca-b087-e7151fb095ff"
 
 [sources]
+AcademicClusters = {url = "https://github.com/brendanjohnharris/AcademicClusters.jl"}
 Fathom = {rev = "main", url = "https://github.com/brendanjohnharris/Fathom.jl"}
-TimeseriesTools = {path="../../TimeseriesTools.jl"}
+MoreMaps = {rev = "main", url = "https://github.com/brendanjohnharris/MoreMaps.jl"}
+TimeseriesMakie = {rev = "main", url = "https://github.com/brendanjohnharris/TimeseriesMakie.jl"}
+TimeseriesTools = {rev = "main", url = "https://github.com/brendanjohnharris/TimeseriesTools.jl"}
+
+[compat]
+CUDA_Runtime_jll = "0.12 - 0.23"
+CairoMakie = "0.15"
+DataFrames = "1"
+DrWatson = "2"
+JLD2 = "0.6"
+MoreMaps = "0.3, 0.4"
+TimeseriesMakie = "0.2.2, 0.3"
+TimeseriesTools = "0.8, 0.9"
+julia = "1.12"
 
 [extras]
 CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"

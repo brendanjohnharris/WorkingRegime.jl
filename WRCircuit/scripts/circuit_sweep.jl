@@ -14,7 +14,7 @@ begin # * Sweep configuration
     B = 32
     seeds = 1:10
     arch = WRCircuit.DEWDROP_BACKEND()
-    path = datadir("critical_sweep")
+    path = datadir("circuit_sweep")
 
     defaults = WRCircuit.defaults(WRCircuit.models.Spatial)
     tmax = 35u"s"
@@ -46,6 +46,7 @@ begin # * Parameter planes: three 2-D planes through the default working-regime 
 
     tau_r_e = round.(range(0.5, 2.0, length = 31); sigdigits = 3)
     tau_d_e = round.(range(2.5, 7.5, length = 25); sigdigits = 3)
+    tau_d_e = round.(range(4, 6, length = 41); sigdigits = 3)
     plane_td = vec([(; tau_r_e = tr, tau_d_e = td) for tr in tau_r_e, td in tau_d_e])
     plane_dtd = vec([(; delta = d, tau_d_e = td) for d in delta, td in tau_d_e])   # δ × τ_d joint plane
 
@@ -99,8 +100,8 @@ function save_member!(bs, i, c, seed)
     freq_axis = 𝑓(range(0, inv(2 * dt_ms), length = nfreq) .* u"ms^-1")    # Welch one-sided frequencies
     fano_axis = 𝑡(fano_taus .* u"ms")                                      # Fano timescale axis
     mad = ToolsArray(permutedims(bs.record.mad.data[:, i, :]), (lag_axis, neuron_labels))
-    # Log-sample each neuron's fine PSD onto critical_demo's log-frequency grid (geometric mean per equal-width
-    # log10 bin): the exponent fit sees the SAME resolution as scripts/plots/critical_demo.jl and the saved
+    # Log-sample each neuron's fine PSD onto demo_run's log-frequency grid (geometric mean per equal-width
+    # log10 bin): the exponent fit sees the SAME resolution as scripts/demo_run.jl and the saved
     # array stays tiny (~50 pts vs ~5000 linear bins). ustripall first (logsample takes log10 of the
     # frequencies), select the 10-1000 Hz band by its ms^-1 value (a u"Hz" selector on the fresh range axis
     # throws), then re-attach ms^-1 units so downstream `spectral_exponents` can still select in u"Hz".
