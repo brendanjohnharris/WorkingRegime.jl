@@ -22,11 +22,13 @@ const SWEEP = let
         fano_taus = collect(logrange(dt_ms * 10, dt_ms * 1000, length = 200)),
         transient_steps = round(Int, ustrip(u"ms", transient) / dt_ms),
         model_defaults = d,
-        # Pivot each plane holds its two non-swept siblings at (rounded like the axes so they match a savename).
+        # Pivot each plane holds its non-swept parameters at (rounded like the axes so they match a savename).
         defaults0 = (;
             delta = round(Float64(d[:delta]); sigdigits = 3),
             Delta_g_K = round(Float64(d[:Delta_g_K]); sigdigits = 3),
             sigma_ee = round(Float64(d[:sigma_ee]); sigdigits = 3),
+            tau_r_e = round(Float64(d[:tau_r_e]); sigdigits = 3),
+            tau_d_e = round(Float64(d[:tau_d_e]); sigdigits = 3),
         ),
         required_keys = ("parameters", "rate", "fano", "inputs/mad", "inputs/psd"),
     )
@@ -142,8 +144,14 @@ function send_sweep(ax1::Pair, ax2::Pair, seed; batch = SWEEP.B, path = datadir(
         deltas = [get(c, :delta, SWEEP.defaults0.delta) for c in chunk]
         dgks = [get(c, :Delta_g_K, SWEEP.defaults0.Delta_g_K) for c in chunk]
         member = (; sigma_ee = t.sigma_ee)
-        :tau_r_e in axes && (member = merge(member, (; tau_r_e = [c.tau_r_e for c in chunk])))
-        :tau_d_e in axes && (member = merge(member, (; tau_d_e = [c.tau_d_e for c in chunk])))
+        # simulate_batch needs BOTH τ params together (or neither), so whenever either is swept pass both --- the
+        # swept one per-member, the other as its scalar default (broadcast across the batch).
+        if :tau_r_e in axes || :tau_d_e in axes
+            member = merge(member, (;
+                tau_r_e = :tau_r_e in axes ? [c.tau_r_e for c in chunk] : SWEEP.defaults0.tau_r_e,
+                tau_d_e = :tau_d_e in axes ? [c.tau_d_e for c in chunk] : SWEEP.defaults0.tau_d_e,
+            ))
+        end
         run_and_save!(model, chunk, seed, deltas, dgks, path; member...)
         nothing
     end

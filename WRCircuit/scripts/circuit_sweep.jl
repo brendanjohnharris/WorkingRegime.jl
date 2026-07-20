@@ -25,18 +25,20 @@ PLANES = [
 ]
 
 if contains(gethostname(), "gadi")
+    batch = 16 # Ok for v100
     @info "Submitting sweep jobs to Gadi"
     setup = quote
         using DrWatson
         @quickactivate :WRCircuit
     end
     jobs = runscripts(
-        vec([:(send_sweep($p1, $p2, $seed)) for (p1, p2) in PLANES, seed in seeds]);
+        vec([:(send_sweep($p1, $p2, $seed; batch = $batch)) for (p1, p2) in PLANES, seed in seeds]);
         setup, queue = "gpuvolta", project = `$(projectdir())`,
     )
     @info "Submitted $(length(jobs)) sweep jobs"
 else
+    batch = 32 # Ok for l40s
     for seed in seeds, (p1, p2) in PLANES
-        send_sweep(p1, p2, seed)
+        send_sweep(p1, p2, seed; batch)
     end
 end
