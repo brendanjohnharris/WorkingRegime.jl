@@ -3,19 +3,17 @@
 #=
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-# Critical sweep — exponent extraction.
+# Circuit sweep — exponent extraction.
 #
-# The sweep (scripts/calculations/circuit_sweep.jl) is THREE intersecting 2-D
-# planes through the default working-regime point, each run over 5 connectome
-# seeds:
-#   - dg plane: (delta, Delta_g_K) at sigma_ee = sigma_ee_0
-#   - ds plane: (delta, sigma_ee)  at Delta_g_K = Delta_g_K_0
-#   - gs plane: (Delta_g_K, sigma_ee) at delta = delta_0
-# For each plane we fit the per-neuron diffusion exponent (from the input MAD) and
-# spectral exponent (from the input PSD) and save *all* per-neuron exponents (not
-# neuron-averages) to data/circuit_exponents.jld2, KEEPING THE SEED AXIS
-# EXPLICIT: every saved grid is (axis1, axis2, seed) of per-neuron exponent
-# vectors, so downstream scripts collapse the seed 'Obs' dimension as they wish.
+# The sweep (scripts/circuit_sweep.jl) writes one result file per (plane cell, seed), each named for exactly
+# its two swept axes + seed. This script groups files back into FIVE 2-D planes through the working-regime
+# point --- a file's non-seed key set IS its plane:
+#   - dg  plane: (delta, Delta_g_K)   - ds plane: (delta, sigma_ee)   - gs plane: (Delta_g_K, sigma_ee)
+#   - td  plane: (tau_r_e, tau_d_e)   - dtd plane: (delta, tau_d_e)
+# For each plane we fit the per-neuron diffusion exponent (from the input MAD) and spectral exponent (from the
+# input PSD) and save *all* per-neuron exponents (not neuron-averages) to data/circuit_exponents.jld2, KEEPING
+# THE SEED AXIS EXPLICIT: every saved grid is (axis1, axis2, seed) of per-neuron exponent vectors, so
+# downstream scripts collapse the seed 'Obs' dimension as they wish.
 
 using DrWatson
 DrWatson.@quickactivate :WRCircuit
@@ -60,113 +58,69 @@ try
     PLANES = [:dtd] # [:dg, :ds, :gs, :td, :dtd]
     want(p) = p in PLANES
 
-    begin # * Index files by (delta, Delta_g_K, sigma_ee, seed) and lay out the three planes
+    begin # * Index sweep files by plane. Each file is named for exactly its two swept axes + seed, so a
+        # file's non-seed key set IS its plane --- no negative filters, no shared 3-key pool.
         files = readdir(datadir("circuit_sweep"), join = true)
-        entries = map(files) do f
-            fname = parse_savename(f; connector = string(connector))[2]
-            needed = ("delta", "Delta_g_K", "sigma_ee", "seed")
-            if haskey(fname, "key") || !all(k -> haskey(fname, k), needed)
-                return nothing
+        parsed = filter(
+            !isnothing, map(files) do f
+                d = try
+                    parse_savename(f; connector = string(connector))[2]
+                catch
+                    return nothing
+                end
+                (haskey(d, "key") || !haskey(d, "seed")) && return nothing
+                return (; file = f, keyset = Set(keys(d)), d)
             end
-            return (;
-                file = f, delta = fname["delta"], Delta_g_K = fname["Delta_g_K"],
-                sigma_ee = fname["sigma_ee"], seed = Int(fname["seed"]),
-            )
+        )
+
+        # Entries (file, v1, v2, seed) for the plane whose two swept axes are (ax1, ax2): files whose varied
+        # keys are EXACTLY {ax1, ax2, seed}.
+        function plane_entries(ax1, ax2)
+            want = Set((string(ax1), string(ax2), "seed"))
+            return [
+                (; file = p.file, v1 = p.d[string(ax1)], v2 = p.d[string(ax2)], seed = Int(p.d["seed"]))
+                for p in parsed if p.keyset == want
+            ]
         end
-        entries = filter(!isnothing, entries)
+        # 3-D file grid (ax1 × ax2 × seed) over the supplied axis lookups; `nothing` where a cell has no file.
+        function plane_grid(entries, ax1, u1, ax2, u2, useed)
+            lk = Dict((e.v1, e.v2, e.seed) => e.file for e in entries)
+            return map(collect(Iterators.product(Dim{ax1}(u1), Dim{ax2}(u2), Dim{:seed}(useed)))) do (a, b, s)
+                get(lk, (a, b, s), nothing)
+            end
+        end
 
-        # Sorted lookups so each saved grid is monotonic along both swept axes.
-        udelta = sort(unique(e.delta for e in entries))
-        ugk = sort(unique(e.Delta_g_K for e in entries))
-        usigma = sort(unique(e.sigma_ee for e in entries))
-        useed = sort(unique(e.seed for e in entries))
-
-        # Plane anchors: the default working-regime point, snapped onto the grids that are
-        # actually present so each plane's fixed coordinate matches a parsed filename value.
+        useed = sort(unique(Int(p.d["seed"]) for p in parsed))
         defaults = WRCircuit.defaults(WRCircuit.models.Spatial)
-        _snap(v, grid) = grid[argmin(abs.(grid .- v))]
+        _snap(v, grid) = isempty(grid) ? v : grid[argmin(abs.(grid .- v))]
+
+        # δ/Δg_K/σ_ee main planes: three 2-axis families sharing the δ, Δg_K, σ_ee axes. Union each shared axis
+        # so grid_dg/ds/gs sit on common (udelta, ugk, usigma) grids --- the layout circuit_exponents.jld2 expects.
+        e_dg = plane_entries(:delta, :Delta_g_K)
+        e_ds = plane_entries(:delta, :sigma_ee)
+        e_gs = plane_entries(:Delta_g_K, :sigma_ee)
+        udelta = sort(unique([e.v1 for e in vcat(e_dg, e_ds)]))
+        ugk = sort(unique(vcat([e.v2 for e in e_dg], [e.v1 for e in e_gs])))
+        usigma = sort(unique(vcat([e.v2 for e in e_ds], [e.v2 for e in e_gs])))
         delta_0 = _snap(round(Float64(defaults[:delta]); sigdigits = 3), udelta)
         Delta_g_K_0 = _snap(round(Float64(defaults[:Delta_g_K]); sigdigits = 3), ugk)
         sigma_ee_0 = _snap(round(Float64(defaults[:sigma_ee]); sigdigits = 3), usigma)
+        grid_dg = plane_grid(e_dg, :delta, udelta, :Delta_g_K, ugk, useed)
+        grid_ds = plane_grid(e_ds, :delta, udelta, :sigma_ee, usigma, useed)
+        grid_gs = plane_grid(e_gs, :Delta_g_K, ugk, :sigma_ee, usigma, useed)
 
-        # (delta, Delta_g_K, sigma_ee, seed) -> file lookup, then one 3-D file grid per plane:
-        # the two swept axes x the explicit seed axis, at the plane's fixed third coordinate.
-        lookup = Dict((e.delta, e.Delta_g_K, e.sigma_ee, e.seed) => e.file for e in entries)
-        file_at(d, gk, s, seed) = get(lookup, (d, gk, s, seed), nothing)
-        grid_dg = map(
-            collect(
-                Iterators.product(
-                    Dim{:delta}(udelta), Dim{:Delta_g_K}(ugk), Dim{:seed}(useed)
-                )
-            )
-        ) do (d, gk, seed)
-            file_at(d, gk, sigma_ee_0, seed)
-        end
-        grid_ds = map(
-            collect(
-                Iterators.product(
-                    Dim{:delta}(udelta), Dim{:sigma_ee}(usigma), Dim{:seed}(useed)
-                )
-            )
-        ) do (d, s, seed)
-            file_at(d, Delta_g_K_0, s, seed)
-        end
-        grid_gs = map(
-            collect(
-                Iterators.product(
-                    Dim{:Delta_g_K}(ugk), Dim{:sigma_ee}(usigma), Dim{:seed}(useed)
-                )
-            )
-        ) do (gk, s, seed)
-            file_at(delta_0, gk, s, seed)
-        end
-        # τ_syn plane: a separate file set keyed by (tau_r_e, tau_d_e, seed) --- the main filter above drops
-        # these (they carry no delta/Delta_g_K/sigma_ee keys), so index them here into a 4th grid over
-        # (tau_r_e, tau_d_e, seed) at the same default working-regime point.
-        tau_entries = filter(
-            !isnothing, map(files) do f
-                fname = parse_savename(f; connector = string(connector))[2]
-                needed = ("tau_r_e", "tau_d_e", "seed")
-                (haskey(fname, "key") || !all(k -> haskey(fname, k), needed)) && return nothing
-                return (; file = f, tau_r_e = fname["tau_r_e"], tau_d_e = fname["tau_d_e"], seed = Int(fname["seed"]))
-            end
-        )
-        utau_r = sort(unique(e.tau_r_e for e in tau_entries))
-        utau_d = sort(unique(e.tau_d_e for e in tau_entries))
+        # τ_syn plane (tau_r_e, tau_d_e) and δ/τ_d plane (delta, tau_d_e): each its own 2-axis family.
+        e_td = plane_entries(:tau_r_e, :tau_d_e)
+        utau_r = sort(unique(e.v1 for e in e_td))
+        utau_d = sort(unique(e.v2 for e in e_td))
         tau_r_e_0 = _snap(round(Float64(defaults[:tau_r_e]); sigdigits = 3), utau_r)
         tau_d_e_0 = _snap(round(Float64(defaults[:tau_d_e]); sigdigits = 3), utau_d)
-        tau_lookup = Dict((e.tau_r_e, e.tau_d_e, e.seed) => e.file for e in tau_entries)
-        grid_td = map(
-            collect(
-                Iterators.product(
-                    Dim{:tau_r_e}(utau_r), Dim{:tau_d_e}(utau_d), Dim{:seed}(useed)
-                )
-            )
-        ) do (tr, td, seed)
-            get(tau_lookup, (tr, td, seed), nothing)
-        end
-        # δ/τ_d plane: (delta, tau_d_e, seed) --- these files carry delta + tau_d_e but no
-        # Delta_g_K/sigma_ee/tau_r_e, so both filters above drop them; index them here into a 5th grid.
-        dtd_entries = filter(
-            !isnothing, map(files) do f
-                fname = parse_savename(f; connector = string(connector))[2]
-                needed = ("delta", "tau_d_e", "seed")
-                (haskey(fname, "key") || !all(k -> haskey(fname, k), needed) || haskey(fname, "Delta_g_K")) && return nothing
-                return (; file = f, delta = fname["delta"], tau_d_e = fname["tau_d_e"], seed = Int(fname["seed"]))
-            end
-        )
-        udtd_delta = sort(unique(e.delta for e in dtd_entries))
-        udtd_tau_d = sort(unique(e.tau_d_e for e in dtd_entries))
-        dtd_lookup = Dict((e.delta, e.tau_d_e, e.seed) => e.file for e in dtd_entries)
-        grid_dtd = map(
-            collect(
-                Iterators.product(
-                    Dim{:delta}(udtd_delta), Dim{:tau_d_e}(udtd_tau_d), Dim{:seed}(useed)
-                )
-            )
-        ) do (d, td, seed)
-            get(dtd_lookup, (d, td, seed), nothing)
-        end
+        grid_td = plane_grid(e_td, :tau_r_e, utau_r, :tau_d_e, utau_d, useed)
+
+        e_dtd = plane_entries(:delta, :tau_d_e)
+        udtd_delta = sort(unique(e.v1 for e in e_dtd))
+        udtd_tau_d = sort(unique(e.v2 for e in e_dtd))
+        grid_dtd = plane_grid(e_dtd, :delta, udtd_delta, :tau_d_e, udtd_tau_d, useed)
         # Blank parameter points with too few sweep files: for each (axis1, axis2), if fewer than
         # N_REQUIRED seeds have a file, drop the whole seed slice so the point is missing everywhere.
         function require_samples!(grid, n_required)

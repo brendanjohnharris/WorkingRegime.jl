@@ -30,31 +30,26 @@ begin # * Sweep configuration
     const transient_steps = round(Int, transient_ms / dt_ms)   # transient dropped on-device by the reductions
 end
 
-begin # * Parameter planes: three 2-D planes through the default working-regime point
-    delta = round.(range(2.5, 5, length = 51); sigdigits = 3)   # extended down to 2.5 (step 0.05 kept; old 3.5..5 hit exactly)
+begin # * Sweep axes + the working-regime point each plane pivots around
+    delta = round.(range(2.5, 5, length = 51); sigdigits = 3)   # step 0.05; old 3.5..5 hit exactly
     Delta_g_K = round.(range(0, 0.005, length = 26); sigdigits = 3)
     sigma_ee = round.(range(0.03, 0.075, length = 19); sigdigits = 3)
-
-    delta_0 = round(Float64(defaults[:delta]); sigdigits = 3)
-    Delta_g_K_0 = round(Float64(defaults[:Delta_g_K]); sigdigits = 3)
-    sigma_ee_0 = round(Float64(defaults[:sigma_ee]); sigdigits = 3)
-    tau_r_e_0 = round(Float64(defaults[:tau_r_e]); sigdigits = 3)
-    plane_dg = [(; delta = d, Delta_g_K = gk, sigma_ee = sigma_ee_0) for d in delta, gk in Delta_g_K]
-    plane_ds = [(; delta = d, Delta_g_K = Delta_g_K_0, sigma_ee = s) for d in delta, s in sigma_ee]
-    plane_gs = [(; delta = delta_0, Delta_g_K = gk, sigma_ee = s) for gk in Delta_g_K, s in sigma_ee]
-    parameter_vector = unique(vcat(vec(plane_dg), vec(plane_ds), vec(plane_gs)))
-
     tau_r_e = round.(range(0.5, 2.0, length = 31); sigdigits = 3)
-    tau_d_e = round.(range(2.5, 7.5, length = 25); sigdigits = 3)
     tau_d_e = round.(range(4, 6, length = 41); sigdigits = 3)
-    plane_td = vec([(; tau_r_e = tr, tau_d_e = td) for tr in tau_r_e, td in tau_d_e])
-    plane_dtd = vec([(; delta = d, tau_d_e = td) for d in delta, td in tau_d_e])   # δ × τ_d joint plane
+
+    # Working-regime defaults (rounded like the axes): `send_sweep` fills any non-axis delta/Delta_g_K/sigma_ee
+    # from here when building each batch, so a plane holds its two non-swept siblings at the working point.
+    defaults0 = (;
+        delta = round(Float64(defaults[:delta]); sigdigits = 3),
+        Delta_g_K = round(Float64(defaults[:Delta_g_K]); sigdigits = 3),
+        sigma_ee = round(Float64(defaults[:sigma_ee]); sigdigits = 3),
+    )
 
     isdir(path) || mkpath(path)
 end
 
 # Shared run helpers: the resume path (defined once, used by both filters and `save_member!`), the fixed
-# reduction kwargs, and the run-a-batch-then-save loop, so both sweep blocks below stay thin.
+# reduction kwargs, and the run-a-batch-then-save loop, so `send_sweep` stays thin.
 savepath(p, seed) = joinpath(path, savename((; p..., seed = seed), "jld2"; connector))
 # A result file is complete iff it carries all of these keys. `haskey` is a metadata lookup (nested paths
 # resolve), so this validates WITHOUT deserialising the arrays --- ~6 ms/file, ~5 min for a full resume scan.
@@ -91,7 +86,7 @@ end
 # Rebuild member `i`'s labelled (stat × Neuron) arrays from its on-device-reduced slice and save one result
 # file. `c` is the member's varied-parameter NamedTuple --- (delta, Delta_g_K, sigma_ee) for the main planes,
 # (tau_r_e, tau_d_e) for the τ_syn plane --- and sets BOTH the saved `parameters` (merged onto `defaults`) and
-# the savename; `seed` is the Obs dimension. Shared by both run blocks so the save recipe lives in one place.
+# the savename; `seed` is the Obs dimension. Shared across every plane so the save recipe lives in one place.
 function save_member!(bs, i, c, seed)
     NE = size(bs.record.rate.data, 1)
     neuron_labels = Neuron(Symbol.("E" .* string.(1:NE)))
@@ -118,68 +113,74 @@ function save_member!(bs, i, c, seed)
     return wsave(savepath(c, seed), out)
 end
 
-begin # * τ_syn plane: (tau_r_e, tau_d_e) at the default point --- batched over the shared connectome
-    # One connectome per seed (sigma_ee = sigma_ee_0 fixed); the (N,B) batch co-executes B τ-cells as per-member
-    # excitatory-synapse overrides (`simulate_batch(; tau_r_e, tau_d_e)`), same cost profile as the other planes.
-    for seed in seeds
-        model = WRCircuit.Spatial(; key = seed)
-        remaining = filter(p -> !saved(p, seed), plane_td)
-        isempty(remaining) && continue
-        chunks = collect(Iterators.partition(remaining, B))
-        @info "τ_syn plane: seed $seed/$(length(seeds)) --- $(length(remaining)) cells in $(length(chunks)) batch(es)"
-        map(Chart(LogLogger(length(chunks))), chunks) do chunk
-            n = length(chunk)
-            run_and_save!(
-                model, chunk, seed, fill(delta_0, n), fill(Delta_g_K_0, n);
-                sigma_ee = sigma_ee_0, tau_r_e = [c.tau_r_e for c in chunk], tau_d_e = [c.tau_d_e for c in chunk]
-            )
-            nothing
+"""
+    send_sweep(:name1 => vec1, :name2 => vec2, seed; batch = B)
+
+Grid-sweep ONE 2-D plane at ONE seed. The two named axes vary over their vectors; every other parameter is
+held at its working-regime default (`defaults0`). Partitioning is decided from the axis NAMES: `sigma_ee` sets
+the connectome, so it can't vary within a batch --- cells are grouped by `sigma_ee` (one connectome per group)
+--- while `delta`/`Delta_g_K`/`tau_r_e`/`tau_d_e` are per-member synapse overrides that co-execute in one
+`(N,B)` batch.
+
+Each result file is named for exactly its two axes + seed (`axis1 & axis2 & seed`), so distinct `(seed, plane)`
+calls write DISJOINT file sets --- resumable, order-independent, and race-free to distribute one-per-GPU (e.g.
+on Gadi). Returns the number of cells (re)computed.
+"""
+function send_sweep(ax1::Pair, ax2::Pair, seed; batch = B)
+    n1, v1 = ax1
+    n2, v2 = ax2
+    axes = (n1, n2)
+    # The cell NamedTuple = savename keys + saved `parameters` overrides: exactly the two swept axes. Every
+    # non-swept parameter stays at its default (recorded inside `parameters` by `save_member!`, not the name).
+    cell(a, b) = NamedTuple{axes}((a, b))
+    cells = vec([cell(a, b) for a in v1, b in v2])
+
+    model = WRCircuit.Spatial(; key = seed)
+    remaining = filter(c -> !saved(c, seed), cells)
+    isempty(remaining) && return 0
+
+    # sigma_ee is the connectome axis → constant per batch: group by it. One group for every other plane.
+    groups = if :sigma_ee in axes
+        [filter(c -> c.sigma_ee == σ, remaining) for σ in unique(c.sigma_ee for c in remaining)]
+    else
+        [remaining]
+    end
+    # Flatten (group → B-chunks) into a task list so the progress logger sees the whole plane's batch count.
+    tasks = NamedTuple[]
+    for group in groups
+        σ = :sigma_ee in axes ? first(group).sigma_ee : defaults0.sigma_ee
+        for chunk in Iterators.partition(group, batch)
+            push!(tasks, (; sigma_ee = σ, chunk = collect(chunk)))
         end
     end
-    nfiles = count(endswith(".jld2"), readdir(path))
-    @info "τ_syn plane done: $nfiles total result files in $path"
-end
 
-begin # * δ/τ_d plane: (delta, tau_d_e) at the default point --- batched over the shared connectome
-    # One connectome per seed (sigma_ee_0, tau_r_e_0 fixed). The (N,B) batch co-executes B (δ, τ_d) cells as
-    # per-member synapse overrides that COMPOSE: δ scales the inhibitory synapses (I→E, I→I; `simulate_batch(deltas)`)
-    # while τ_d sets the excitatory decay (E→E, E→I, drives; `simulate_batch(; tau_r_e, tau_d_e)`) --- disjoint
-    # projections, so both vary independently on one shared connectome. Saved as `delta=…&seed=…&tau_d_e=…`.
-    for seed in seeds
-        model = WRCircuit.Spatial(; key = seed)
-        remaining = filter(p -> !saved(p, seed), plane_dtd)
-        isempty(remaining) && continue
-        chunks = collect(Iterators.partition(remaining, B))
-        @info "δ/τ_d plane: seed $seed/$(length(seeds)) --- $(length(remaining)) cells in $(length(chunks)) batch(es)"
-        map(Chart(LogLogger(length(chunks))), chunks) do chunk
-            n = length(chunk)
-            run_and_save!(
-                model, chunk, seed, [c.delta for c in chunk], fill(Delta_g_K_0, n);
-                sigma_ee = sigma_ee_0, tau_r_e = fill(tau_r_e_0, n), tau_d_e = [c.tau_d_e for c in chunk]
-            )
-            nothing
-        end
+    @info "seed $seed: $n1 × $n2 --- $(length(remaining)) cells in $(length(tasks)) batch(es)"
+    map(Chart(LogLogger(length(tasks))), tasks) do t   # sequential (one GPU): batches run one at a time
+        chunk = t.chunk
+        deltas = [get(c, :delta, defaults0.delta) for c in chunk]
+        dgks = [get(c, :Delta_g_K, defaults0.Delta_g_K) for c in chunk]
+        member = (; sigma_ee = t.sigma_ee)
+        :tau_r_e in axes && (member = merge(member, (; tau_r_e = [c.tau_r_e for c in chunk])))
+        :tau_d_e in axes && (member = merge(member, (; tau_d_e = [c.tau_d_e for c in chunk])))
+        run_and_save!(model, chunk, seed, deltas, dgks; member...)
+        nothing
     end
-    nfiles = count(endswith(".jld2"), readdir(path))
-    @info "δ/τ_d plane done: $nfiles total result files in $path"
+    return length(remaining)
 end
 
-begin # * Run: outer over (seed × sigma_ee) --- one connectome each; inner (N,B) batch over (delta, Delta_g_K)
-    for seed in seeds
-        model = WRCircuit.Spatial(; key = seed)
-        # this seed's not-yet-saved combos (resume), grouped by sigma_ee (the connectome axis → one build each)
-        remaining = filter(p -> !saved(p, seed), parameter_vector)
-        isempty(remaining) && continue
-        @info "Computing seed $seed/$(length(seeds))"
-        sigmas = unique(p.sigma_ee for p in remaining)
-        map(Chart(LogLogger(length(sigmas))), sigmas) do σ
-            combos = filter(p -> p.sigma_ee == σ, remaining)
-            for chunk in Iterators.partition(combos, B)
-                @debug "seed $seed / sigma_ee $σ: batch of $(length(chunk))"
-                run_and_save!(model, chunk, seed, [c.delta for c in chunk], [c.Delta_g_K for c in chunk]; sigma_ee = σ)
-            end
-            nothing
-        end
+# The five planes, each an (axis1, axis2) pair = one `send_sweep` call. Looping (seed × PLANES) runs the whole
+# sweep; distributing that product across GPUs is the parallel entry point (a job for later).
+PLANES = [
+    (:tau_r_e => tau_r_e, :tau_d_e => tau_d_e),        # τ_syn
+    (:delta => delta, :tau_d_e => tau_d_e),           # δ/τ_d
+    # (:delta => delta, :Delta_g_K => Delta_g_K),       # δ × Δg_K
+    # (:delta => delta, :sigma_ee => sigma_ee),         # δ × σ_ee
+    # (:Delta_g_K => Delta_g_K, :sigma_ee => sigma_ee), # Δg_K × σ_ee
+]
+
+begin # * Run: every plane at every seed (resume skips finished cells; shared central cells compute once)
+    for seed in seeds, (ax1, ax2) in PLANES
+        send_sweep(ax1, ax2, seed)
     end
     nfiles = count(endswith(".jld2"), readdir(path))
     @info "Sweep done: $nfiles result files in $path"
