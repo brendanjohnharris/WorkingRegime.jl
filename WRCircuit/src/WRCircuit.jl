@@ -17,6 +17,7 @@ include("SpatialNetwork.jl")
 include("ModelInterface.jl")
 include("Utils.jl")
 include("Plots.jl")
+include("Sweep.jl")
 
 const stats = (;
     firing_rate = Dewdrop.firing_rate,
