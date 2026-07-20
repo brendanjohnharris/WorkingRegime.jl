@@ -25,7 +25,7 @@ PLANES = [
 ]
 
 if contains(gethostname(), "gadi")
-    batch = 16 # Ok for v100
+    batch = 22 # Ok for v100
     @info "Submitting sweep jobs to Gadi"
     setup = quote
         using DrWatson
