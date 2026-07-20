@@ -14,7 +14,7 @@ sigma_ee = round.(range(0.03, 0.075, length = 19); sigdigits = 3)
 tau_r_e = round.(range(0.5, 2.0, length = 31); sigdigits = 3)
 tau_d_e = round.(range(4, 6, length = 41); sigdigits = 3)
 
-seeds = 1:10
+seeds = [1] # 1:10
 
 PLANES = [
     # (:tau_r_e => tau_r_e, :tau_d_e => tau_d_e),        # τ_syn
