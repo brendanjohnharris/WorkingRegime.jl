@@ -19,9 +19,6 @@ data*/
 docsb/build/
 docs/site/
 /plots*/
-WRCircuit/plots/
-WRExperiment/plots/
-WRTheory/plots/
 __pycache__/
 logs/
 cache/
@@ -34,3 +31,12 @@ old_plots/
 Manifest copy.toml
 .claude
 *.pdf
+
+WRCircuit/plots/
+WRCircuit/data/
+
+WRExperiment/plots/
+WRExperiment/data/
+
+WRTheory/plots/
+WRTheory/data/
