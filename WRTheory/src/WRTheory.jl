@@ -17,7 +17,7 @@ const _preamble = quote
     using DiffEqNoiseProcess
     using Optim
     import FractionalNeuralSampling: Density
-    set_theme!(foresight(:physics))
+    set_theme!(fathom())
     global_logger(TerminalLogger(right_justify = 200))
     return nothing
 end
