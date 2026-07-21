@@ -32,16 +32,6 @@ try
         if contains(gethostname(), "physics.usyd.edu.au")
             AcademicClusters.USydPhysics.distributeprocs(Inf; mem = "6GB", ncpus = 1)
             addprocs(16)
-
-            @everywhere begin
-                using WRCircuit
-                @info "WRCircuit loaded on worker $(myid())"
-                import WRCircuit
-                using DrWatson
-                using TimeseriesTools
-                using Optim
-                import ForwardDiff
-            end
         elseif contains(gethostname(), "gadi") && haskey(ENV, "PBS_NCPUS")
             addprocs(parse(Int, ENV["PBS_NCPUS"]))
         end
@@ -89,10 +79,10 @@ try
         # Entries (file, v1, v2, seed) for the plane whose two swept axes are (ax1, ax2): files whose varied
         # keys are EXACTLY {ax1, ax2, seed}.
         function plane_entries(ax1, ax2)
-            want = Set((string(ax1), string(ax2), "seed"))
+            wantkeys = Set((string(ax1), string(ax2), "seed"))   # NOT `want`: that name is the `want(p)` plane filter, which try-scope makes a shared local this nested fn would clobber
             return [
                 (; file = p.file, v1 = p.d[string(ax1)], v2 = p.d[string(ax2)], seed = Int(p.d["seed"]))
-                    for p in parsed if p.keyset == want
+                    for p in parsed if p.keyset == wantkeys
             ]
         end
         # 3-D file grid (ax1 × ax2 × seed) over the supplied axis lookups; `nothing` where a cell has no file.
