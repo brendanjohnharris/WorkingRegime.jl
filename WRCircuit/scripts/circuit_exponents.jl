@@ -29,9 +29,22 @@ WRCircuit.@preamble
 
 try
     begin # * Add procs and load code everywhere
-        AcademicClusters.USydPhysics.distributeprocs(Inf; mem = "6GB", ncpus = 1)
-        addprocs(16)
+        if contains(gethostname(), "physics.usyd.edu.au")
+            AcademicClusters.USydPhysics.distributeprocs(Inf; mem = "6GB", ncpus = 1)
+            addprocs(16)
 
+            @everywhere begin
+                using WRCircuit
+                @info "WRCircuit loaded on worker $(myid())"
+                import WRCircuit
+                using DrWatson
+                using TimeseriesTools
+                using Optim
+                import ForwardDiff
+            end
+        elseif contains(gethostname(), "gadi") && haskey(ENV, "PBS_NCPUS")
+            addprocs(parse(Int, ENV["PBS_NCPUS"]))
+        end
         @everywhere begin
             using WRCircuit
             @info "WRCircuit loaded on worker $(myid())"
@@ -79,7 +92,7 @@ try
             want = Set((string(ax1), string(ax2), "seed"))
             return [
                 (; file = p.file, v1 = p.d[string(ax1)], v2 = p.d[string(ax2)], seed = Int(p.d["seed"]))
-                for p in parsed if p.keyset == want
+                    for p in parsed if p.keyset == want
             ]
         end
         # 3-D file grid (ax1 × ax2 × seed) over the supplied axis lookups; `nothing` where a cell has no file.

@@ -25,7 +25,7 @@ PLANES = [
 ]
 
 if contains(gethostname(), "gadi")
-    batch = 88 # Ok for v100
+    batch = 92 # Ok for v100
     @info "Submitting sweep jobs to Gadi"
     setup = quote
         using DrWatson
@@ -33,7 +33,7 @@ if contains(gethostname(), "gadi")
     end
     jobs = runscripts(
         vec([:(send_sweep($p1, $p2, $seed; batch = $batch)) for (p1, p2) in PLANES, seed in seeds]);
-        setup, queue = "gpuhopper", project = `$(projectdir())`,
+        setup, queue = "gpuhopper", project = `$(projectdir())`, walltime = "10:00:00"
     ) # gpuvolta, batch22
     @info "Submitted $(length(jobs)) sweep jobs"
 else
