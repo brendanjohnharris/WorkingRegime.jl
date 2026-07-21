@@ -13,7 +13,6 @@ using Random
 
 set_theme!(fathom())
 
-
 const structures = ["VISp", "VISl", "VISrl", "VISal", "VISpm", "VISam"]
 const hierarchy_scores = Dict(
     "VISp" => -0.357, "VISl" => -0.093, "VISrl" => -0.059,
@@ -27,17 +26,22 @@ const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
 # δ/τ_d plane ROI: framed on the L2/3 hierarchy path plus the working point (δ_0 = 4, τd_0 = 5). The data a/b
 # now use the same MAPPLE estimator as the circuit (WRExperiment.diffusion_fit/mapple_fit), so no offset
 # correction is applied. Re-tune these bounds if the regenerated data lands elsewhere.
-const DELTA_MIN = 2.5
-const DELTA_MAX = 4.3
-const TAU_D_MIN = 4.0
-const TAU_D_MAX = 5.3
+const DELTA_MIN = 2.75
+const DELTA_MAX = 3.4
+const TAU_D_MIN = 4.5
+const TAU_D_MAX = 5.5
 
 # Span of the local window over which the circuit arrow directions are measured
 const DELTA_DELTA = 0.5
 const DELTA_TAU_D = 0.4
+const DELTA_CENTER = 3.2
+const TAU_D_CENTER = 4.75
 
 # Draw the circuit δ / τ_d direction arrows on the (a, b) panels. Set false to show only the bFNS α/β arrows.
-const SHOW_CIRCUIT_ARROWS = false
+const SHOW_CIRCUIT_ARROWS = true
+
+# Overlay the L2/3 hierarchy path (region scatter + connecting line) on the δ/τ_d heatmaps.
+const SHOW_DTD_REGIONS = false
 
 # Shared origin of the direction arrows, in (a, b) data coordinates.
 const ARROW_ORIGIN = (0.55, -1.75)
@@ -78,7 +82,7 @@ function JLD2.rconvert(::Type{<:NamedArray}, x)
 end
 const _toolsarray_typemap = Dict(
     # WRExperiment.jld2 was saved when ToolsArray lived under TimeseriesTools;
-    # critical_sweep.jld2 was saved after the refactor, so its inner cells use
+    # circuit_exponents.jld2 was saved after the refactor, so its inner cells use
     # the new TimeseriesBase.ToolsArrays path. Its outer grid is a plain
     # DimensionalData.DimArray (built from Iterators.product). Upgrade all three
     # to the same NamedArray shim.
@@ -137,7 +141,7 @@ plot_data = jldopen(
 # Circuit per-neuron exponent grids — three planes through the working-regime
 # point, each saved as (axis₁, axis₂, seed) of per-neuron exponent vectors. We
 # pool seed + neuron to a per-cell median for the heatmaps and the arrows.
-const circuit_path = projectdir("WRCircuit", "data", "plots", "critical_sweep.jld2")
+const circuit_path = projectdir("WRCircuit", "data", "circuit_exponents.jld2")
 circuit = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), circuit_path;
     typemap = _toolsarray_typemap
@@ -187,8 +191,8 @@ const B_dtd = _B_dtd_full[δ_dtd_keep, τd_dtd_keep]
 const _dtd_bad = _A_dtd_full .> 1
 const _A_dtd_arrow = ifelse.(_dtd_bad, NaN, _A_dtd_full)
 const _B_dtd_arrow = ifelse.(_dtd_bad, NaN, _B_dtd_full)
-const δ_arrow_range = (δ_0 - DELTA_DELTA / 2, δ_0 + DELTA_DELTA / 2)   # window centered on the green working point
-const τd_arrow_range = (τd_0 - DELTA_TAU_D / 2, τd_0 + DELTA_TAU_D / 2)
+const δ_arrow_range = (DELTA_CENTER - DELTA_DELTA / 2, DELTA_CENTER + DELTA_DELTA / 2)   # window centered on DELTA_CENTER
+const τd_arrow_range = (TAU_D_CENTER - DELTA_TAU_D / 2, TAU_D_CENTER + DELTA_TAU_D / 2)
 
 "Nearest grid index to a target value in a lookup vector."
 _nearest(lookup, v) = argmin(abs.(lookup .- v))
@@ -476,8 +480,7 @@ begin # * δ/τ_d plane heatmaps — the joint (δ × τ_d_e) plane, a (left) an
     τdlab = "τ_d_e  (E decay, ms)"
     ax_dtd_a = circuit_heatmap!(
         gs[3], δ_dtd, τd_dtd, A_dtd;
-        xlabel = δlab, ylabel = τdlab, title = "Circuit:  a", clabel = "a",
-        colorrange = (0.5, 0.7), highclip = cgrad(HEATMAP)[end], lowclip = cgrad(HEATMAP)[1]
+        xlabel = δlab, ylabel = τdlab, title = "Circuit:  a", clabel = "a"
     )
     ax_dtd_b = circuit_heatmap!(
         gs[4], δ_dtd, τd_dtd, B_dtd;
@@ -486,10 +489,10 @@ begin # * δ/τ_d plane heatmaps — the joint (δ × τ_d_e) plane, a (left) an
     # Overlay the L2/3 hierarchy path: each area mapped to the (δ, τ_d) cell whose circuit (a, b) is closest
     # to its measured (a, b) (data now uses the same MAPPLE estimator as the circuit), distance normalised
     # by the data spans. Areas are joined in hierarchy order (low -> high); fill = area colour.
-    let aspan = scatterlimits[1][2] - scatterlimits[1][1], bspan = scatterlimits[2][2] - scatterlimits[2][1]
+    SHOW_DTD_REGIONS && let aspan = scatterlimits[1][2] - scatterlimits[1][1], bspan = scatterlimits[2][2] - scatterlimits[2][1]
         closest_dt = function (a_d, b_d)
             best = (1, 1); bd = Inf
-            for i in eachindex(δ_dtd_lookup), j in eachindex(τd_dtd_lookup)
+            for i in δ_dtd_keep, j in τd_dtd_keep # restrict to DELTA/TAU_D min-max ranges
                 ac = _A_dtd_full[i, j]; bc = _B_dtd_full[i, j]
                 (isnan(ac) || isnan(bc)) && continue
                 dd = ((ac - a_d) / aspan)^2 + ((bc - b_d) / bspan)^2
@@ -509,12 +512,12 @@ begin # * δ/τ_d plane heatmaps — the joint (δ × τ_d_e) plane, a (left) an
         end
     end
     # Default working point (δ_0, τd_0) --- the circuit's nominal operating regime, for reference.
-    for ax in (ax_dtd_a, ax_dtd_b)
-        scatter!(
-            ax, [δ_0], [τd_0]; color = :white, marker = :star5,
-            markersize = 22, strokecolor = :black, strokewidth = 1.5
-        )
-    end
+    # for ax in (ax_dtd_a, ax_dtd_b)
+    #     scatter!(
+    #         ax, [δ_0], [τd_0]; color = :white, marker = :star5,
+    #         markersize = 22, strokecolor = :black, strokewidth = 1.5
+    #     )
+    # end
 end
 
 # A matching categorical colorbar on each top panel keeps the two axes the same

@@ -47,7 +47,7 @@ function submit_calculations(exprs; queue = ``, mem = 50, ncpus = 8, walltime = 
             walltime,
             project = Cmd([projectdir()]),
             exeflags = `+1.12`,
-            queue = `taiji`
+            queue = queue
         )
     end
 end

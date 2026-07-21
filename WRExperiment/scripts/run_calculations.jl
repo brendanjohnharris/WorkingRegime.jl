@@ -60,7 +60,7 @@ map(_params) do p
 end
 
 if !isempty(params)
-    if haskey(ENV, "SM_CLUSTER") && ENV["SM_CLUSTER"] == "true"
+    if contains(gethostname(), "physics.usyd.edu.au")
         exprs = map(params) do (o, stimulus, structure)
             expr = quote
                 using Pkg
@@ -86,18 +86,13 @@ if !isempty(params)
                 )
             end
         end
-    elseif ENV["HOSTNAME"] ∈ ["cartman.physics.usyd.edu.au", "karl.physics.usyd.edu.au"]
+    else
         addprocs(7)
         @everywhere import AllenNeuropixelsBase as AN
         @everywhere using WRExperiment
 
         map(Chart(MoreMaps.Pmap(), LogLogger()), params) do param
             @info "Calculating madev for $(param)"
-            WRExperiment.send_madev(param...)
-            GC.gc()
-        end
-    else
-        map(Chart(LogLogger()), params) do param
             WRExperiment.send_madev(param...)
             GC.gc()
         end
