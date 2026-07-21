@@ -33,7 +33,7 @@ try
             AcademicClusters.USydPhysics.distributeprocs(Inf; mem = "6GB", ncpus = 1)
             addprocs(16)
         elseif contains(gethostname(), "gadi") && haskey(ENV, "PBS_NCPUS")
-            addprocs(parse(Int, ENV["PBS_NCPUS"]))
+            NCIGadi.distributeprocs() # Defaults to as many single-cpu workers as available
         end
         @everywhere begin
             using WRCircuit
