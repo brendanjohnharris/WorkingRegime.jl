@@ -122,13 +122,13 @@ function madev(x::AbstractVector, lags; p = 1)
 end
 function madev(x::UnivariateRegular, _lags; kwargs...)
     lags = round.(Int, _lags ./ TimeseriesTools.samplingperiod(x))
-    return Timeseries(_lags, madev(parent(x), lags; kwargs...))
+    return Timeseries(madev(parent(x), lags; kwargs...), _lags)
 end
 function madev(x::MultivariateRegular, _lags; kwargs...)
     lags = round.(Int, _lags ./ TimeseriesTools.samplingperiod(x))
     d = dims(x)[2:end]
     m = mapslices(x -> madev(x, lags; kwargs...), parent(x); dims = 1)
-    return Timeseries(_lags, d..., m)
+    return Timeseries(m, _lags, d...)
 end
 
 function _count(spike_times, τ; bins = minimum(spike_times):τ:maximum(spike_times))
@@ -156,13 +156,13 @@ function fano_factor(
         τ_values::AbstractVector = defaultfanobins(spike_times)
     )
     f = [fano_factor(spike_times, τ) for τ in τ_values]
-    return Timeseries(τ_values, f)
+    return Timeseries(f, τ_values)
 end
 
 function send_madev(
         sessionid, stimulus, structure;
-        outpath = calcdir("madev"),
-        plotpath = calcdir("plots", "madev")
+        outpath = DrWatson.datadir("calculations"),
+        # plotpath = calcdir("plots", "madev")
     )
     params = (;
         sessionid,
@@ -190,14 +190,14 @@ function send_madev(
     fstimulus = _params[:stimulus] isa Regex ? _params[:stimulus].pattern :
         _params[:stimulus]
 
-    plotfile = joinpath(
-        plotpath, "$(_params[:sessionid])",
-        "$(fstimulus)_$(_params[:structure]).pdf"
-    )
-    psdplotfile = joinpath(
-        plotpath, "$(_params[:sessionid])_psd",
-        "$(fstimulus)_$(_params[:structure]).pdf"
-    )
+    # plotfile = joinpath(
+    #     plotpath, "$(_params[:sessionid])",
+    #     "$(fstimulus)_$(_params[:structure]).pdf"
+    # )
+    # psdplotfile = joinpath(
+    #     plotpath, "$(_params[:sessionid])_psd",
+    #     "$(fstimulus)_$(_params[:structure]).pdf"
+    # )
 
     if isempty(ssession) # Only initialize session if we have to
         session = AN.Session(params[:sessionid])
@@ -226,34 +226,34 @@ function send_madev(
             depths = AN.getchanneldepths(session, LFP; method = :probe)
             S = set(S, Chan => Depth(depths))
 
-            begin
-                f = Figure()
-                colorrange = extrema(depths)
-                ax = Axis(
-                    f[1, 1]; xscale = log10, yscale = log10,
-                    xtickformat = "{:.1f}",
-                    limits = (params[:pass], (nothing, nothing)),
-                    xgridvisible = true,
-                    ygridvisible = true, topspinevisible = true,
-                    title = "$(_params[:structure]), $(_params[:stimulus])",
-                    xminorticksvisible = true, yminorticksvisible = true,
-                    xminorgridvisible = true, yminorgridvisible = true,
-                    xminorgridstyle = :dash
-                )
-                p = traces!(
-                    ax, S[2:end, :]; colormap = cgrad(sunset, alpha = 0.4),
-                    linewidth = 3, colorrange
-                )
+            # begin
+            #     f = Figure()
+            #     colorrange = extrema(depths)
+            #     ax = Axis(
+            #         f[1, 1]; xscale = log10, yscale = log10,
+            #         xtickformat = "{:.1f}",
+            #         limits = (params[:pass], (nothing, nothing)),
+            #         xgridvisible = true,
+            #         ygridvisible = true, topspinevisible = true,
+            #         title = "$(_params[:structure]), $(_params[:stimulus])",
+            #         xminorticksvisible = true, yminorticksvisible = true,
+            #         xminorgridvisible = true, yminorgridvisible = true,
+            #         xminorgridstyle = :dash
+            #     )
+            #     p = traces!(
+            #         ax, S[2:end, :]; colormap = cgrad(sunset, alpha = 0.4),
+            #         linewidth = 3, colorrange
+            #     )
 
-                c = Colorbar(
-                    f[1, 2]; label = "Channel depth (μm)", colorrange,
-                    colormap = sunset
-                )
-                # rowsize!(f.layout, 1, Relative(0.8))
-                mkpath(joinpath(plotpath, "$(_params[:sessionid])_psd"))
-                wsave(psdplotfile, f)
-                @info "Saved plot to `$psdplotfile`"
-            end
+            #     c = Colorbar(
+            #         f[1, 2]; label = "Channel depth (μm)", colorrange,
+            #         colormap = sunset
+            #     )
+            #     # rowsize!(f.layout, 1, Relative(0.8))
+            #     mkpath(joinpath(plotpath, "$(_params[:sessionid])_psd"))
+            #     wsave(psdplotfile, f)
+            #     @info "Saved plot to `$psdplotfile`"
+            # end
         end
 
         taus = range(-3, 0, 50)
@@ -274,32 +274,32 @@ function send_madev(
         chi = map(s -> last(mapple_fit(s))[:χ], eachslice(S, dims = 2))
 
         mmad = mad ./ maximum(mad, dims = 1)
-        begin
-            f = Figure()
-            colorrange = extrema(depths)
-            ax = Axis(
-                f[1, 1]; xscale = log10, yscale = log10,
-                xtickformat = "{:.1f}",
-                xgridvisible = true,
-                ygridvisible = true, topspinevisible = true,
-                title = "$(_params[:structure]), $(_params[:stimulus])",
-                xminorticksvisible = true, yminorticksvisible = true,
-                xminorgridvisible = true, yminorgridvisible = true,
-                xminorgridstyle = :dash
-            )
-            p = traces!(
-                ax, mmad; colormap = cgrad(sunset, alpha = 0.4),
-                linewidth = 3, colorrange
-            )
-            c = Colorbar(
-                f[1, 2]; label = "Channel depth (μm)", colorrange,
-                colormap = sunset
-            )
-            # rowsize!(f.layout, 1, Relative(0.8))
-            mkpath(joinpath(plotpath, "$(_params[:sessionid])"))
-            wsave(plotfile, f)
-            @info "Saved plot to `$plotfile`"
-        end
+        # begin
+        #     f = Figure()
+        #     colorrange = extrema(depths)
+        #     ax = Axis(
+        #         f[1, 1]; xscale = log10, yscale = log10,
+        #         xtickformat = "{:.1f}",
+        #         xgridvisible = true,
+        #         ygridvisible = true, topspinevisible = true,
+        #         title = "$(_params[:structure]), $(_params[:stimulus])",
+        #         xminorticksvisible = true, yminorticksvisible = true,
+        #         xminorgridvisible = true, yminorgridvisible = true,
+        #         xminorgridstyle = :dash
+        #     )
+        #     p = traces!(
+        #         ax, mmad; colormap = cgrad(sunset, alpha = 0.4),
+        #         linewidth = 3, colorrange
+        #     )
+        #     c = Colorbar(
+        #         f[1, 2]; label = "Channel depth (μm)", colorrange,
+        #         colormap = sunset
+        #     )
+        #     # rowsize!(f.layout, 1, Relative(0.8))
+        #     mkpath(joinpath(plotpath, "$(_params[:sessionid])"))
+        #     wsave(plotfile, f)
+        #     @info "Saved plot to `$plotfile`"
+        # end
 
         begin # * Fano factor calculations
             unitdepths = produce_unitdepths(session)
@@ -344,7 +344,7 @@ function send_madev(
             "coeffs" => coeffs .|> Float32,
             "chi" => chi .|> Float32,      # spectral MAPPLE exponent per channel
             "unitdepths" => unitdepths,
-            "plotfiles" => relpath.([plotfile], [projectdir()])
+            # "plotfiles" => relpath.([plotfile], [projectdir()])
         )
         tagsave(outfile, outD)
 
@@ -479,11 +479,6 @@ function mediankendallpvalue(x::AbstractVector, Y::AbstractMatrix; N = 10000)
     return (; τ = mtau, ci, 𝑝, U = tst.U, n = length(x), N)
 end
 
-# Cache-path helpers, vendored from SpatiotemporalMotifs. SM's `_DIR()` resolves to "" for WRExperiment
-# (no θ/γ/causal-filter data variants), so calcdir drops that suffix; savepath (+ val_to_string/allowedtypes)
-# is verbatim, so the `data/madev` cache filenames are byte-identical.
-calcdir(args...; kwargs...) = projectdir("data", args...; kwargs...)
-
 val_to_string(v) = v isa Regex ? v.pattern : string(v)
 const allowedtypes = (Real, String, Regex, Symbol, TimeType, Vector, Tuple)
 
@@ -603,12 +598,11 @@ function has_calc_keys(calctype::Val{:madev}, D)
         "coeffs",
         "chi",
         "unitdepths",
-        "plotfiles",
+        # "plotfiles",
     ]
     return (haskey(D, "error") && contains(D["error"], "Region error")) ||
         (
-        has_keys(D, required_keys) &&
-            all(isfile.(projectdir.(D["plotfiles"])))
+        has_keys(D, required_keys) #&& all(isfile.(projectdir.(D["plotfiles"])))
     )
 end
 

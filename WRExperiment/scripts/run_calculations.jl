@@ -6,6 +6,7 @@ using DrWatson
 @quickactivate "WRExperiment"
 using WRExperiment
 using MoreMaps
+using Preferences
 using AcademicClusters
 using Distributed
 using ProgressLogging
@@ -27,12 +28,11 @@ using Unitful
 import AllenNeuropixelsBase as AN
 import AllenNeuropixelsBase: Depth
 import TimeseriesTools: freqs
-calcdir = DrWatson.datadir
 
-path = calcdir("madev")
+path = DrWatson.datadir("calculations")
 mkpath(path)
 stimuli = ["spontaneous", "flash_250ms", r"Natural_Images"]
-session_table = load(calcdir("plots", "session_table.jld2"), "session_table")
+session_table = load(DrWatson.datadir("session_table.jld2"), "session_table")
 oursessions = session_table.ecephys_session_id
 
 pstructures = deepcopy(structures)

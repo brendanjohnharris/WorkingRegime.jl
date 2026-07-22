@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "96dd28101058c92032f7719433ab18c5334ceda9"
+project_hash = "fbe8f28e84fcb4972bcfb92840d2e9dc67e5a828"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "ec6be48a85c93d995563b84bff8a86bc98df45ce"
@@ -39,7 +39,7 @@ version = "0.4.5"
 
 [[deps.AcademicClusters]]
 deps = ["Distributed", "Preferences"]
-git-tree-sha1 = "117e70f5cb2a8d6a419b79e4e2bd8de26c0d0547"
+git-tree-sha1 = "50182b503bb661046b53906d578ef445ab5ea435"
 repo-rev = "main"
 repo-url = "https://github.com/brendanjohnharris/AcademicClusters.jl"
 uuid = "0d53aa51-fded-4285-958f-a79747f7b7b4"
@@ -695,9 +695,9 @@ version = "4.2.0"
 
 [[deps.DSP]]
 deps = ["Bessels", "FFTW", "IterTools", "LinearAlgebra", "Polynomials", "Random", "Reexport", "SpecialFunctions", "Statistics"]
-git-tree-sha1 = "d335b2929e1b6067951a1250df247cc5fab7d40e"
+git-tree-sha1 = "a65cfc2999988f5ba09fc4bd8049e3ed914e5a04"
 uuid = "717857b8-e6f2-59f4-9121-6e50c889abd2"
-version = "0.8.5"
+version = "0.8.6"
 weakdeps = ["OffsetArrays"]
 
     [deps.DSP.extensions]
@@ -1148,7 +1148,7 @@ version = "0.6.4+0"
 
 [[deps.Fathom]]
 deps = ["Colors", "FileIO", "Format", "ImageClipboard", "LinearAlgebra", "Makie", "Preferences", "Random"]
-git-tree-sha1 = "2c8fbc07e89ef48352a56e4bcea0ed1374f84f01"
+git-tree-sha1 = "4f174d53aae31edf285f6f12ae8ec72aba439a34"
 repo-rev = "main"
 repo-url = "https://github.com/brendanjohnharris/Fathom.jl"
 uuid = "05518021-a905-466c-bf96-cf0c89e1b0a0"
@@ -1199,9 +1199,9 @@ version = "1.11.0"
 
 [[deps.FillArrays]]
 deps = ["LinearAlgebra"]
-git-tree-sha1 = "2f979084d1e13948a3352cf64a25df6bd3b4dca3"
+git-tree-sha1 = "5bad39456d9f0166184fce2248783dd9862645c1"
 uuid = "1a297f60-69ca-5386-bcde-b61e274b549b"
-version = "1.16.0"
+version = "1.17.0"
 weakdeps = ["PDMats", "SparseArrays", "StaticArrays", "Statistics"]
 
     [deps.FillArrays.extensions]
@@ -1567,9 +1567,9 @@ version = "1.0.0"
 
 [[deps.InfiniteArrays]]
 deps = ["ArrayLayouts", "FillArrays", "Infinities", "LazyArrays", "LinearAlgebra"]
-git-tree-sha1 = "b5335e596ed59124518c8d3ddb0150bcb271f41e"
+git-tree-sha1 = "1109e52f8b937db332d00c3acee344fcb0fc4a1a"
 uuid = "4858937d-0d70-526a-a4dd-2d5cb5dd786c"
-version = "0.15.12"
+version = "0.15.13"
 weakdeps = ["BandedMatrices", "BlockArrays", "BlockBandedMatrices", "DSP", "Statistics"]
 
     [deps.InfiniteArrays.extensions]
@@ -2559,9 +2559,9 @@ version = "1.8.2"
 
 [[deps.OrdinaryDiffEqCore]]
 deps = ["ADTypes", "Accessors", "Adapt", "ArrayInterface", "BinaryHeaps", "CommonSolve", "ConstructionBase", "DiffEqBase", "DocStringExtensions", "EnumX", "EnzymeCore", "FastBroadcast", "FastClosures", "FastPower", "FindFirstFunctions", "FunctionWrappers", "FunctionWrappersWrappers", "InteractiveUtils", "LinearAlgebra", "Logging", "MacroTools", "MuladdMacro", "PrecompileTools", "Preferences", "Random", "RecursiveArrayTools", "Reexport", "SciMLBase", "SciMLLogging", "SciMLOperators", "SciMLStructures", "SymbolicIndexingInterface", "TruncatedStacktraces"]
-git-tree-sha1 = "ee36b306c1f7010fe81ed5544786754a6f141d4f"
+git-tree-sha1 = "c6b1285393fea2aed95876801110d3b4959231f1"
 uuid = "bbf590c4-e513-4bbe-9b18-05decba2e5d8"
-version = "4.7.1"
+version = "4.8.0"
 
     [deps.OrdinaryDiffEqCore.extensions]
     OrdinaryDiffEqCoreMooncakeExt = "Mooncake"
@@ -2575,9 +2575,9 @@ version = "4.7.1"
 
 [[deps.OrdinaryDiffEqDifferentiation]]
 deps = ["ADTypes", "ArrayInterface", "ConcreteStructs", "ConstructionBase", "DiffEqBase", "DifferentiationInterface", "FastBroadcast", "FiniteDiff", "ForwardDiff", "FunctionWrappersWrappers", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEqCore", "SciMLBase", "SciMLOperators", "SparseMatrixColorings", "StaticArraysCore"]
-git-tree-sha1 = "62c51fdbaf278b367b55da18294ee47fa59ff493"
+git-tree-sha1 = "4e490965d490314171cc63aca57a90242b2377d1"
 uuid = "4302a76b-040a-498a-8c04-15b101fed76b"
-version = "3.3.1"
+version = "3.3.2"
 weakdeps = ["SparseArrays"]
 
     [deps.OrdinaryDiffEqDifferentiation.extensions]
@@ -3038,9 +3038,9 @@ version = "3.7.2"
 
 [[deps.SciMLBase]]
 deps = ["ADTypes", "Accessors", "Adapt", "ArrayInterface", "CommonSolve", "ConstructionBase", "Distributed", "DocStringExtensions", "EnumX", "FindFirstFunctions", "FunctionWrappersWrappers", "IteratorInterfaceExtensions", "LinearAlgebra", "Logging", "Markdown", "PreallocationTools", "PrecompileTools", "Preferences", "Printf", "Random", "RecipesBase", "RecursiveArrayTools", "Reexport", "RuntimeGeneratedFunctions", "SciMLLogging", "SciMLOperators", "SciMLPublic", "SciMLStructures", "StaticArraysCore", "Statistics", "SymbolicIndexingInterface"]
-git-tree-sha1 = "c248f27771416daab4f2e573a956f41467d43821"
+git-tree-sha1 = "31ac2340dd2e27662420f8a368f18c7d20eddd33"
 uuid = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
-version = "3.36.0"
+version = "3.36.1"
 
     [deps.SciMLBase.extensions]
     SciMLBaseChainRulesCoreExt = "ChainRulesCore"
@@ -3101,9 +3101,9 @@ weakdeps = ["Tracy"]
 
 [[deps.SciMLOperators]]
 deps = ["Accessors", "Adapt", "ArrayInterface", "DocStringExtensions", "LinearAlgebra"]
-git-tree-sha1 = "6727e42481434c5e72574e7957c4a97e70ee3c6a"
+git-tree-sha1 = "71878d6cb880919fcf64135083fbac0bc2ef0098"
 uuid = "c0aeaf25-5076-4817-a8d5-81caf7dfa961"
-version = "1.24.3"
+version = "1.24.4"
 
     [deps.SciMLOperators.extensions]
     SciMLOperatorsLoopVectorizationExt = "LoopVectorization"
@@ -3744,13 +3744,13 @@ uuid = "c67b497e-b367-4c10-bc65-d9a961b6272f"
 version = "0.1.0"
 
 [[deps.WRExperiment]]
-deps = ["AcademicClusters", "AllenNeuropixelsBase", "Bootstrap", "CairoMakie", "Clustering", "CondaPkg", "DataFrames", "Dates", "DimensionalData", "Distributed", "DrWatson", "FileIO", "ForwardDiff", "HypothesisTests", "IntervalSets", "JLD2", "LinearAlgebra", "Makie", "MoreMaps", "MultipleTesting", "Optim", "Peaks", "Preferences", "ProgressLogging", "PythonCall", "Random", "Statistics", "StatsBase", "Suppressor", "TimeseriesTools", "Unitful"]
+deps = ["AcademicClusters", "AllenNeuropixelsBase", "Bootstrap", "CairoMakie", "Clustering", "CondaPkg", "DataFrames", "Dates", "DimensionalData", "Distributed", "DrWatson", "Fathom", "FileIO", "ForwardDiff", "HypothesisTests", "IntervalSets", "JLD2", "LinearAlgebra", "Makie", "MoreMaps", "MultipleTesting", "Optim", "Peaks", "Preferences", "ProgressLogging", "PythonCall", "Random", "Statistics", "StatsBase", "Suppressor", "TimeseriesTools", "Unitful"]
 path = "WRExperiment"
 uuid = "307ef536-9873-49c6-956c-2db2231701d5"
 version = "0.1.0"
 
 [[deps.WRTheory]]
-deps = ["AcademicClusters", "CairoMakie", "ComplexityMeasures", "DelimitedFiles", "Distributions", "DrWatson", "FractionalNeuralSampling", "Hurst", "JLD2", "Logging", "Makie", "MittagLeffler", "MoreMaps", "ProgressLogging", "SpecialFunctions", "StableDistributions", "StatsBase", "StochasticDiffEq", "Suppressor", "TerminalLoggers", "TimeseriesBase", "TimeseriesMakie", "TimeseriesTools", "Unitful"]
+deps = ["AcademicClusters", "CairoMakie", "ComplexityMeasures", "DelimitedFiles", "DiffEqNoiseProcess", "Distributions", "DrWatson", "Fathom", "FractionalNeuralSampling", "Hurst", "JLD2", "Logging", "Makie", "MittagLeffler", "MoreMaps", "Optim", "ProgressLogging", "SpecialFunctions", "StableDistributions", "StatsBase", "StochasticDiffEq", "Suppressor", "TerminalLoggers", "TimeseriesBase", "TimeseriesMakie", "TimeseriesTools", "Unitful"]
 path = "WRTheory"
 uuid = "8e081d7b-eb6b-409e-83e1-e18f77bd210e"
 version = "0.1.0"

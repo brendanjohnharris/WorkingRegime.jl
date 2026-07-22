@@ -42,3 +42,4 @@ AllenNeuropixelsBase = {rev = "main", url = "https://www.github.com/brendanjohnh
 
 [compat]
 AllenNeuropixelsBase = "0.5.0"
+

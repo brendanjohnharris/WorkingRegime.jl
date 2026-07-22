@@ -41,7 +41,7 @@ function build_spatial(;
         seed = 0x05fd, arch::Dewdrop.AbstractArchitecture = DEWDROP_BACKEND(),
         T::Type{<:AbstractFloat} = Float32, index_type::Type{<:Integer} = Int32,
         tspan = (0.0, 1.0), count_empty::Bool = true, shared_drive::Bool = true,
-        weight_dist::Symbol = :gaussian, weight_cv::Real = 0.05
+        weight_dist::Symbol = :gaussian, weight_cv::Real = 0.05, weight_ee_only::Bool = false
     )
     seed = UInt64(seed)
     # --- geometry: E on a cell-centred grid, I uniform-random, on a periodic [0,dx]² sheet ---
@@ -69,7 +69,13 @@ function build_spatial(;
     # into K --- `J_ie = J_ee·K_ee·δ/K_ie`, `J_ii = J_ei·K_ei·δ/K_ii`); sign carried by the reversal potential.
     J_ie = J_ee * K_ee * delta / K_ie
     J_ii = J_ei * K_ei * delta / K_ii
-    cw(J, tag) = Dewdrop.correlate_weights(J; jitter = weight_cv, dist = weight_dist, seed = _subseed(seed, tag), count_empty = count_empty)
+    # `weight_ee_only` applies the weight_dist/weight_cv heterogeneity to the recurrent E→E path only (the
+    # Gu-Qi-Gong choice); every other projection + drive stays at the baseline Gaussian cv (0.05).
+    cw(J, tag; ee = false) = Dewdrop.correlate_weights(
+        J; jitter = (weight_ee_only && !ee) ? 0.05 : weight_cv,
+        dist = (weight_ee_only && !ee) ? :gaussian : weight_dist,
+        seed = _subseed(seed, tag), count_empty = count_empty
+    )
     # --- builder: populations → four recurrent distance-fixed-count paths → external drive ---
     nb = Dewdrop.network(; tspan = tspan, arch = arch)
     Dewdrop.population!(nb, :E, E, NE; positions = posE)
@@ -77,7 +83,7 @@ function build_spatial(;
     Dewdrop.project!(
         nb, :E => :E, exc(); kernel = Dewdrop.exponential_kernel(sigma_ee), count = K_ee * NE,
         weight = 1.0, delay = e_delay, seed = _subseed(seed, 2), allow_self = true, period = period,
-        adjust = cw(J_ee, 6), index_type = index_type
+        adjust = cw(J_ee, 6; ee = true), index_type = index_type
     )
     Dewdrop.project!(
         nb, :E => :I, exc(); kernel = Dewdrop.exponential_kernel(sigma_ei), count = K_ei * NI,
