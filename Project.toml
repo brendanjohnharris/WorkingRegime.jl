@@ -15,6 +15,7 @@ JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 MoreMaps = "d6ea422f-1f55-4be1-bfc3-e7c09aa4d855"
 TimeseriesMakie = "5e3e9a77-7bbf-480c-931c-0802e2453f5a"
 TimeseriesTools = "380cddd1-6ef2-46ca-b087-e7151fb095ff"
+TimeseriesBase = "c2aba7f5-82a4-4c45-a741-402bb41ee238"
 
 [sources]
 AcademicClusters = {url = "https://github.com/brendanjohnharris/AcademicClusters.jl"}
@@ -22,6 +23,7 @@ Fathom = {rev = "main", url = "https://github.com/brendanjohnharris/Fathom.jl"}
 MoreMaps = {rev = "main", url = "https://github.com/brendanjohnharris/MoreMaps.jl"}
 TimeseriesMakie = {rev = "main", url = "https://github.com/brendanjohnharris/TimeseriesMakie.jl"}
 TimeseriesTools = {rev = "main", url = "https://github.com/brendanjohnharris/TimeseriesTools.jl"}
+TimeseriesBase = {rev = "main", url = "https://github.com/brendanjohnharris/TimeseriesBase.jl"}
 
 [compat]
 CUDA_Runtime_jll = "0.12 - 0.23"

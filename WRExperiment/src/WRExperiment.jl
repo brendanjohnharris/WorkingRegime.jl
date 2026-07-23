@@ -28,7 +28,8 @@ include("Patch.jl")
 export structures, layers, PTHR, hierarchy_scores, THETA, GAMMA, bootstrapmedian, val_to_string,
     calcquality, calcdir, savepath, SessionID, Trial, Structure, Unit, CLUSTER, DEFAULT_SESSION_ID,
     hierarchicalkendall, mediankendallpvalue, @preamble,
-    send_madev, produce_unitdepths, madev, mapple_fit, diffusion_fit, fano_factor, rates, plotspectrum!
+    send_madev, produce_unitdepths, madev, mapple_fit, diffusion_fit, fano_factor, rates, plotspectrum!,
+    parselayernum, commondepths
 
 function submit_calculations(exprs; queue = ``, mem = 50, ncpus = 8, walltime = 8)
     exprs = deepcopy(exprs)

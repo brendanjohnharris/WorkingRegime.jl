@@ -324,8 +324,8 @@ begin # * Save pre-computed curves for combined plotting
     )
 
     mkpath(datadir("plots"))
-    jldsave(datadir("plots", "circuit_curves.jld2"); circuit_curves)
-    @info "Saved circuit curves to $(datadir("plots", "circuit_curves.jld2"))"
+    jldsave(datadir("circuit_curves.jld2"); circuit_curves)
+    @info "Saved circuit curves to $(datadir("circuit_curves.jld2"))"
 end
 
 begin # * Supplementary figure: distribution of input distribution parameters
@@ -659,6 +659,7 @@ begin # * Additional properties: image and distribution fit
     colsize!(g, 1, Relative(0.35))
 
     display(mf)
+    wsave(plotdir("critical_demo", "key_properties.png"), mf)
     wsave(plotdir("critical_demo", "key_properties.pdf"), mf)
 end
 

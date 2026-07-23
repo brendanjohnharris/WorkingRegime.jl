@@ -41,7 +41,7 @@ function build_spatial(;
         seed = 0x05fd, arch::Dewdrop.AbstractArchitecture = DEWDROP_BACKEND(),
         T::Type{<:AbstractFloat} = Float32, index_type::Type{<:Integer} = Int32,
         tspan = (0.0, 1.0), count_empty::Bool = true, shared_drive::Bool = true,
-        weight_dist::Symbol = :gaussian, weight_cv::Real = 0.05, weight_ee_only::Bool = false
+        weight_dist::Symbol = :gaussian, weight_cv::Real = 0.1, weight_ee_only::Bool = false # weight_cv = 0.05
     )
     seed = UInt64(seed)
     # --- geometry: E on a cell-centred grid, I uniform-random, on a periodic [0,dx]² sheet ---

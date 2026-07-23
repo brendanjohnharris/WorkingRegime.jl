@@ -10,6 +10,7 @@ using CairoMakie
 using Fathom
 using DataFrames
 using TimeseriesTools
+using TimeseriesBase
 using Statistics
 using Random
 set_theme!(Fathom.fathom())
@@ -26,87 +27,20 @@ function bootstrapmedian(x; N = 10_000, α = 0.05)
     return m, (lo, hi)
 end
 
-CairoMakie.update_theme!(; Axis = (; xlabelsize = 14, ylabelsize = 14))
-
-
 stimuli_str = ["r\"Natural_Images\"", "spontaneous", "flash_250ms"]
 
-# Upgrade stored ToolsArrays to a lightweight struct on load, since the
-# SpatiotemporalMotifs dim types (SessionID, Structure, ...) aren't in this
-# project. We keep only the numeric data + dim-name => lookup pairs, which
-# is enough for indexing and bootstrap stats.
-struct NamedArray{T, N}
-    data::Array{T, N}
-    dims::Vector{Pair{Symbol, Vector}}
-end
-Base.collect(x::NamedArray) = x.data
-
-# The stored dim type is serialized as a JLD2.ReconstructedStatic whose type
-# Symbol looks like "SessionID{...}" / "Structure{...}" / "Dim{layer,...}".
-# Parse the leading identifier as the dim name.
-function _dim_name(d)
-    tname = string(typeof(d).parameters[1])
-    head = first(split(tname, ('{', ',', ' ')))
-    if head == "Dim"
-        # "Dim{layer,..." — grab the inner name
-        inner = split(tname, '{'; limit = 2)[2]
-        return Symbol(first(split(inner, (',', '}'))))
-    end
-    return Symbol(head)
-end
-
-function _dim_lookup(d)
-    v = d.val
-    data = v.data
-    return collect(data)
-end
-
-function _try_dim_pair(d)
-    try
-        return _dim_name(d) => _dim_lookup(d)
-    catch
-        return nothing
-    end
-end
-
-function JLD2.rconvert(::Type{<:NamedArray}, x)
-    data = x.data
-    outer = Pair{Symbol, Vector}[]
-    for d in x.dims
-        p = _try_dim_pair(d)
-        p === nothing || push!(outer, p)
-    end
-    return NamedArray(collect(data), outer)
-end
-
-# Key matches the current fully-qualified type name; JLD2 routes the stored
-# "ToolsArray{...}" symbol through this typemap to select Upgrade(NamedArray).
-const _toolsarray_typemap = Dict(
-    "TimeseriesTools.ToolsArray" => JLD2.Upgrade(NamedArray),
-)
-
-function _select(x::NamedArray, selectors::Pair...)
-    idxs = Any[Colon() for _ in x.dims]
-    for (name, val) in selectors
-        i = findfirst(d -> d.first == Symbol(name), x.dims)
-        i === nothing && error("Dim $name not found in $(first.(x.dims))")
-        j = findfirst(==(val), x.dims[i].second)
-        j === nothing && error("Value $val not found in $(x.dims[i].first) lookup")
-        idxs[i] = j
-    end
-    return x.data[idxs...]
-end
+_select(x, selectors::Pair...) = getindex(x; (Symbol(n) => At(v) for (n, v) in selectors)...)
 
 # Load experiment data
-inpath = projectdir("WRExperiment", "data", "plots", "WRExperiment.jld2")
+inpath = projectdir("WRExperiment", "data", "WRExperiment.jld2")
 plot_data = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), inpath;
-    typemap = _toolsarray_typemap
+    typemap = toolsarray_typemap
 )
 
 # Load circuit data
-circuit_path = projectdir("WRCircuit", "data", "plots", "circuit_curves.jld2")
-circuit = load(circuit_path, "circuit_curves")
+circuit_path = projectdir("WRCircuit", "data", "circuit_curves.jld2")
+circuit = loadtoolsarray(circuit_path, "circuit_curves")
 
 outdir = plotsdir("combined_curves")
 experiment_color = :cornflowerblue

@@ -35,16 +35,20 @@ alpha = 0.8
 bandalpha = 0.2
 mkpath(plotdir("madev"))
 
-plot_data, data_file = produce_or_load(Dict(), calcdir("plots");
-                                       filename = savepath("wr_madev")) do _
+plot_data, data_file = produce_or_load(
+    Dict(), calcdir("plots");
+    filename = savepath("wr_madev")
+) do _
     session_table = load(calcdir("plots", "posthoc_session_table.jld2"), "session_table")
     oursessions = session_table.ecephys_session_id
     path = calcdir("madev")
     QQ = calcquality(path)
     plot_data = map(stimuli) do stimulus
-        Q = QQ[stimulus = At(stimulus),
-               Structure = At(structures),
-               SessionID(At(oursessions))]
+        Q = QQ[
+            stimulus = At(stimulus),
+            Structure = At(structures),
+            SessionID(At(oursessions)),
+        ]
         @assert mean(Q) > 0.9
 
         begin # * Load data
@@ -53,8 +57,10 @@ plot_data, data_file = produce_or_load(Dict(), calcdir("plots");
                     if Q[SessionID = At(sessionid), Structure = At(structure)] == 0
                         return nothing
                     end
-                    filename = savepath((@strdict sessionid structure stimulus), "jld2",
-                                        path)
+                    filename = savepath(
+                        (@strdict sessionid structure stimulus), "jld2",
+                        path
+                    )
                     mad = load(filename, "mad")
                     coeffs = load(filename, "coeffs")
                     S = load(filename, "S")
@@ -62,7 +68,7 @@ plot_data, data_file = produce_or_load(Dict(), calcdir("plots");
                 end
                 out = filter(!isnothing, out)
                 out = filter(out) do x # Remove sessions that don't have data to a reasonable depth
-                    maximum(DimensionalData.metadata(x[1])[:streamlinedepths]) > 0.90
+                    maximum(DimensionalData.metadata(x[1])[:streamlinedepths]) > 0.9
                 end
 
                 S = getindex.(out, 3)
@@ -112,12 +118,24 @@ plot_data, data_file = produce_or_load(Dict(), calcdir("plots");
                     @assert issorted(lookup(o, Depth))
                     o = set(o, Depth => unidepths)
                 end
-                layernames = ToolsArray(stack(getindex.(DimensionalData.metadata.(out),
-                                                        :layernames)),
-                                        (Dim{:depths}(unidepths), SessionID(sessions)))
-                layernums = ToolsArray(stack(getindex.(DimensionalData.metadata.(out),
-                                                       :layernums)),
-                                       (Dim{:depths}(unidepths), SessionID(sessions)))
+                layernames = ToolsArray(
+                    stack(
+                        getindex.(
+                            DimensionalData.metadata.(out),
+                            :layernames
+                        )
+                    ),
+                    (Dim{:depths}(unidepths), SessionID(sessions))
+                )
+                layernums = ToolsArray(
+                    stack(
+                        getindex.(
+                            DimensionalData.metadata.(out),
+                            :layernums
+                        )
+                    ),
+                    (Dim{:depths}(unidepths), SessionID(sessions))
+                )
                 mad = stack(SessionID(sessions), out, dims = 3) .|> Float32
                 coeffs = stack(SessionID(sessions), coeffs, dims = 2) .|> Float32
                 S = stack(SessionID(sessions), S, dims = 3) .|> Float32
@@ -168,7 +186,7 @@ plot_data, data_file = produce_or_load(Dict(), calcdir("plots");
             #     N = UnitEnergy(s, dims = 1)
             #     N(s) .|> Float32
             # end # ! No normalization
-            layerints = load(calcdir("plots", "grand_unified_layers.jld2"), "layerints")
+            layerints = load(DrWatson.datadir("grand_unified_layers.jld2"), "layerints")
         end
 
         coeffs = ToolsArray(collect(coeffs), (Structure(structures),))
@@ -188,8 +206,10 @@ plot_data, data_file = produce_or_load(Dict(), calcdir("plots");
                 end
                 cat(ss..., dims = :layer)
             end
-            coeffs_median = ToolsArray(coeffs_median |> collect,
-                                       (Structure(lookup(Q, Structure)),))
+            coeffs_median = ToolsArray(
+                coeffs_median |> collect,
+                (Structure(lookup(Q, Structure)),)
+            )
         end
 
         plot_data = @strdict M M̄ S S̄ coeffs coeffs_median layernames layernums layerints meanlayers oursessions Q
@@ -217,25 +237,35 @@ for stimulus in stimuli
         end
 
         begin # * Plot the intercept
-            ax = Axis(f[1, 1]; ylabel = "Cortical depth (%)",
-                      xlabel = "Median diffusion exponent",
-                      limits = ((0.25, 0.75), (0, 1)), ytickformat = depthticks,
-                      title = "Diffusion exponent", yreversed = true)
+            ax = Axis(
+                f[1, 1]; ylabel = "Cortical depth (%)",
+                xlabel = "Median diffusion exponent",
+                limits = ((0.25, 0.75), (0, 1)), ytickformat = depthticks,
+                title = "Diffusion exponent", yreversed = true
+            )
             vlines!(ax, 0.5; color = :gray, linewidth = 3, linestyle = :dash)
 
             for (i, _b) in coeffs |> enumerate |> collect |> reverse
-                μ, (σl, σh) = bootstrapmedian(_b .+ eps() .* randn(size(_b)),
-                                              dims = SessionID)
+                μ, (σl, σh) = bootstrapmedian(
+                    _b .+ eps() .* randn(size(_b)),
+                    dims = SessionID
+                )
                 μ, σl, σh = upsample.((μ, σl, σh), 5)
 
-                band!(ax, Point2f.(collect(σl), lookup(μ, 1)),
-                      Point2f.(collect(σh), lookup(μ, 1));
-                      color = (structurecolors[i], 0.32), label = structures[i])
-                lines!(ax, collect(μ), lookup(μ, 1); color = (structurecolors[i], alpha),
-                       label = structures[i])
+                band!(
+                    ax, Point2f.(collect(σl), lookup(μ, 1)),
+                    Point2f.(collect(σh), lookup(μ, 1));
+                    color = (structurecolors[i], 0.32), label = structures[i]
+                )
+                lines!(
+                    ax, collect(μ), lookup(μ, 1); color = (structurecolors[i], alpha),
+                    label = structures[i]
+                )
             end
-            l = axislegend(ax, position = :lb, nbanks = 2, labelsize = 12, merge = true,
-                           margin = (30, 0, 10, 0))
+            l = axislegend(
+                ax, position = :lb, nbanks = 2, labelsize = 12, merge = true,
+                margin = (30, 0, 10, 0)
+            )
             reverselegend!(l)
             plotlayerints!(ax, layerints; axis = :y, newticks = false)
         end
@@ -270,28 +300,36 @@ for stimulus in stimuli
 
             markersize = 10
 
-            ax = Axis(f[1, 2]; ylabel = "Cortical depth (%)",
-                      xlabel = "Kendall's 𝜏",
-                      ytickformat = depthticks,
-                      xtickformat,
-                      title = "Diffusion exponent gradient",
-                      limits = ((-0.6, 0.4), (0, 1)),
-                      yreversed = true,
-                      yticklabelsvisible = false)
+            ax = Axis(
+                f[1, 2]; ylabel = "Cortical depth (%)",
+                xlabel = "Kendall's 𝜏",
+                ytickformat = depthticks,
+                xtickformat,
+                title = "Diffusion exponent gradient",
+                limits = ((-0.6, 0.4), (0, 1)),
+                yreversed = true,
+                yticklabelsvisible = false
+            )
 
             vlines!(ax, 0; color = :gray, linewidth = 3, linestyle = :dash)
 
-            band!(ax, Point2f.(collect(first.(σ)), unidepths),
-                  Point2f.(collect(last.(σ)), unidepths);
-                  color = (:cornflowerblue, bandalpha),
-                  label = "Diffusion exponent")
+            band!(
+                ax, Point2f.(collect(first.(σ)), unidepths),
+                Point2f.(collect(last.(σ)), unidepths);
+                color = (:cornflowerblue, bandalpha),
+                label = "Diffusion exponent"
+            )
             # lines!(ax, unidepths, collect(μ); alpha = bandalpha,
             #        label = "1/𝑓 exponent", color = crimson)
-            scatter!(ax, collect(μ[𝑝 .< PTHR]), unidepths[𝑝 .< PTHR];
-                     label = "Diffusion exponent", color = :cornflowerblue, markersize)
-            scatter!(ax, collect(μ[𝑝 .≥ PTHR]), unidepths[𝑝 .≥ PTHR]; color = :transparent,
-                     strokecolor = :cornflowerblue,
-                     strokewidth = 1, markersize)
+            scatter!(
+                ax, collect(μ[𝑝 .< PTHR]), unidepths[𝑝 .< PTHR];
+                label = "Diffusion exponent", color = :cornflowerblue, markersize
+            )
+            scatter!(
+                ax, collect(μ[𝑝 .≥ PTHR]), unidepths[𝑝 .≥ PTHR]; color = :transparent,
+                strokecolor = :cornflowerblue,
+                strokewidth = 1, markersize
+            )
 
             # axislegend(ax, position = :lb, merge = true, labelsize = 12, nbanks = 1)
 
@@ -309,13 +347,15 @@ for stimulus in stimuli
                 m = median(m, dims = :layer)
                 m = dropdims(m, dims = :layer)
             end
-            ax = Axis(sf[1, 1]; ylabel = "MAD",
-                      xlabel = "Time lag (s)",
-                      title = "Mean absolute deviation in VISp L2/3", xscale = log10,
-                      yscale = log10,)
+            ax = Axis(
+                sf[1, 1]; ylabel = "MAD",
+                xlabel = "Time lag (s)",
+                title = "Mean absolute deviation in VISp L2/3", xscale = log10,
+                yscale = log10,
+            )
 
             # * Fit exponent
-            _m = m[𝑡 = 1e-3 .. 1e-2]
+            _m = m[𝑡 = 1.0e-3 .. 1.0e-2]
             t = log10.(times(_m))
             s = log10.(parent(_m))
             coeff = hcat(ones(length(t)), t) \ s
@@ -326,9 +366,11 @@ for stimulus in stimuli
             @info "mad median: $meanslope, CI: ($sl, $su)"
             # slopeerror = std(slope) / 2 #quantile.([slope], [0.25, 0.75])
 
-            text!(ax, [1e-3], [10^(-4.25)];
-                  text = "a = $(round(meanslope, sigdigits=2))",
-                  align = (:left, :top), fontsize = 20)
+            text!(
+                ax, [1.0e-3], [10^(-4.25)];
+                text = "a = $(round(meanslope, sigdigits = 2))",
+                align = (:left, :top), fontsize = 20
+            )
 
             mu = median(m, dims = SessionID)
             mu = dropdims(mu, dims = SessionID)
@@ -340,25 +382,29 @@ for stimulus in stimuli
 
             lines!(ax, mu)
 
-            lines!(ax, lookup(_m, 𝑡),
-                   exp10.(meanintercept .+ meanslope .* log10.(times(_m))),
-                   linestyle = :dash, color = crimson)
+            lines!(
+                ax, lookup(_m, 𝑡),
+                exp10.(meanintercept .+ meanslope .* log10.(times(_m))),
+                linestyle = :dash, color = crimson
+            )
         end
 
         if true # * Inset variation across areas
             ssf = OnePanel()
-            ax = Axis(ssf[1, 1];
-                      yticks = (1:4, ["L2/3", "L4", "L5", "L6"]),
-                      #   width = Relative(0.5),
-                      #   height = Relative(0.6),
-                      #   halign = 1,
-                      #   valign = 0.0,
-                      limits = ((0.35, 0.65), nothing),
-                      yreversed = true,
-                      #   xaxisposition = :top
-                      ylabel = "Cortical layer",
-                      xlabel = "Diffusion exponent",
-                      ygridvisible = false)
+            ax = Axis(
+                ssf[1, 1];
+                yticks = (1:4, ["L2/3", "L4", "L5", "L6"]),
+                #   width = Relative(0.5),
+                #   height = Relative(0.6),
+                #   halign = 1,
+                #   valign = 0.0,
+                limits = ((0.35, 0.65), nothing),
+                yreversed = true,
+                #   xaxisposition = :top
+                ylabel = "Cortical layer",
+                xlabel = "Diffusion exponent",
+                ygridvisible = false
+            )
             layers_to_plot = [2, 3, 4, 5]
             structure_offsets = [-0.375, -0.225, -0.075, 0.075, 0.225, 0.375] .* 0.9  # Offsets for each structure within a layer
 
@@ -384,20 +430,24 @@ for stimulus in stimuli
                     x_pos = layer_idx + structure_offsets[struct_idx]
 
                     if p < PTHR
-                        boxplot!(ax, fill(x_pos, size(_a, SessionID)),
-                                 collect(x)[:]; show_outliers = false,
-                                 orientation = :horizontal,
-                                 color = structurecolors[struct_idx],
-                                 strokecolor = structurecolors[struct_idx],
-                                 strokewidth = 1, width = 0.1, whiskerlinewidth = 0,
-                                 medianlinewidth = 2, label = structure)
+                        boxplot!(
+                            ax, fill(x_pos, size(_a, SessionID)),
+                            collect(x)[:]; show_outliers = false,
+                            orientation = :horizontal,
+                            color = structurecolors[struct_idx],
+                            strokecolor = structurecolors[struct_idx],
+                            strokewidth = 1, width = 0.1, whiskerlinewidth = 0,
+                            medianlinewidth = 2, label = structure
+                        )
                     else
-                        boxplot!(ax, fill(x_pos, size(_a, SessionID)),
-                                 collect(x)[:]; show_outliers = false,
-                                 color = :transparent, orientation = :horizontal,
-                                 strokecolor = structurecolors[struct_idx],
-                                 strokewidth = 1, width = 0.1, whiskerlinewidth = 0,
-                                 medianlinewidth = 2, label = structure)
+                        boxplot!(
+                            ax, fill(x_pos, size(_a, SessionID)),
+                            collect(x)[:]; show_outliers = false,
+                            color = :transparent, orientation = :horizontal,
+                            strokecolor = structurecolors[struct_idx],
+                            strokewidth = 1, width = 0.1, whiskerlinewidth = 0,
+                            medianlinewidth = 2, label = structure
+                        )
                     end
                 end
             end

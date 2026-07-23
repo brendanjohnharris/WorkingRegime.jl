@@ -10,19 +10,16 @@
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-run() { chmod u+x "$1" && "$1"; }
-
 # * Figure 1
 # ? Experiment
-run "$PROJECT_DIR/WRExperiment/scripts/calculations/collect_plot_data.jl"
-run "$PROJECT_DIR/scripts/plots/combined_curves.jl"
+bash "$PROJECT_DIR/scripts/plots/combined_curves.jl"
 
 # * Figure 2
-run "$PROJECT_DIR/WRTheory/scripts/fractional_operator_summary.jl"
+bash "$PROJECT_DIR/WRTheory/scripts/fractional_operator_summary.jl"
 
 # * Figure 3
-run "$PROJECT_DIR/WRTheory/scripts/Circuit/model_summary.jl"
+bash "$PROJECT_DIR/WRTheory/scripts/Circuit/model_summary.jl"
 
 # * Figure 4
-run "$PROJECT_DIR/WRTheory/scripts/Circuit/input_mean_field.jl" # * b--e
-run "$PROJECT_DIR/WRTheory/scripts/Circuit/mean_field_sweep.jl" # * f -- h
+bash "$PROJECT_DIR/WRTheory/scripts/Circuit/input_mean_field.jl" # * b--e
+bash "$PROJECT_DIR/WRTheory/scripts/Circuit/mean_field_sweep.jl" # * f -- h

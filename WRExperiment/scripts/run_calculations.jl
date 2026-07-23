@@ -70,26 +70,21 @@ if !isempty(params)
                 WRExperiment.send_madev($o, $stimulus, $structure)
             end
         end
-        batches = batches = 1:ceil(Int, 64):length(exprs)
+        batches = 1:64:length(exprs)
         batches = [exprs[i:min(i + 63, length(exprs))] for i in batches]
         for batch in batches
             WRExperiment.submit_calculations(
-                batch[1:min(length(batch), 32)], mem = 32,
-                ncpus = 3, walltime = 8,
-                queue = `taiji`
+                batch, mem = 32, ncpus = 3,
+                walltime = 8,
+                queue = `defaultQ`
             )
-            if length(batch) > 32
-                WRExperiment.submit_calculations(
-                    batch[32:end], mem = 32, ncpus = 3,
-                    walltime = 8,
-                    queue = `defaultQ`
-                )
-            end
         end
     else
         addprocs(7)
         @everywhere import AllenNeuropixelsBase as AN
         @everywhere using WRExperiment
+        @everywhere using MoreMaps
+        @everywhere using Distributed
 
         map(Chart(MoreMaps.Pmap(), LogLogger()), params) do param
             @info "Calculating madev for $(param)"

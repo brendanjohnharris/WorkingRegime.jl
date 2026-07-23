@@ -5,56 +5,46 @@ exec julia +1.12 -t auto "${BASH_SOURCE[0]}" "$@"
 using DrWatson
 DrWatson.quickactivate("WRExperiment")
 using Distributed
-
-begin
-    # collect is single-process now that the per-channel fits moved to send_madev --- no workers needed.
-    expr = quote
-        using DrWatson
-        using WRExperiment
-        using AcademicClusters
-        using Distributed
-        using ProgressLogging
-        using DimensionalData
-        using Peaks
-        using FileIO
-        using JLD2
-        using IntervalSets
-        using DimensionalData
-        using TimeseriesTools
-        using StatsBase
-        using Statistics
-        using DataFrames
-        using HypothesisTests
-        using MultipleTesting
-        using Distributed
-        using Random
-        using Unitful
-        import AllenNeuropixelsBase as AN
-        import AllenNeuropixelsBase: Depth
-        import TimeseriesTools: freqs
-        calcdir = DrWatson.datadir
-    end
-    @eval $expr
-end
+using DrWatson
+using WRExperiment
+using AcademicClusters
+using Distributed
+using ProgressLogging
+using DimensionalData
+using Peaks
+using FileIO
+using JLD2
+using IntervalSets
+using DimensionalData
+using TimeseriesTools
+using StatsBase
+using Statistics
+using DataFrames
+using HypothesisTests
+using MultipleTesting
+using Distributed
+using Random
+using Unitful
+import AllenNeuropixelsBase as AN
+import AllenNeuropixelsBase: Depth
+import TimeseriesTools: freqs
 
 # * Collect plot data
 begin
     stimuli = [r"Natural_Images", "spontaneous", "flash_250ms"]
 
-    # ============================================================================ #
-    # Step 1: MAD / Diffusion exponent data (from fig2_mad.jl / diffusion_exponent.jl)
-    # ============================================================================ #
+
     madev_data, _ = produce_or_load(
-        Dict(), calcdir("plots");
+        Dict(), DrWatson.datadir();
         filename = savepath("mad_psd")
     ) do _
         session_table = load(
-            calcdir("plots", "posthoc_session_table.jld2"),
+            DrWatson.datadir("session_table.jld2"),
             "session_table"
         )
         oursessions = session_table.ecephys_session_id
-        path = calcdir("madev")
-        QQ = calcquality(path)
+        path = DrWatson.datadir("calculations")
+        QQ = WRExperiment.calcquality(path)
         plot_data = map(stimuli) do stimulus
             Q = QQ[
                 stimulus = At(stimulus),
@@ -97,9 +87,10 @@ begin
 
                     unidepths = commondepths(streamlinedepths)
                     out = map(out, streamlinedepths, layerinfo) do o, s, l
-                        o = set(o, Depth => s)
-                        layernames = ToolsArray(l[1], (Depth(lookup(o, Depth)),))
-                        layernums = ToolsArray(l[3], (Depth(lookup(o, Depth)),))
+                        p = sortperm(s) # streamline depths are per-channel, not depth-ordered; sort so `Near` works
+                        o = set(o[Depth(p)], Depth => s[p])
+                        layernames = ToolsArray(l[1][p], (Depth(lookup(o, Depth)),))
+                        layernums = ToolsArray(l[3][p], (Depth(lookup(o, Depth)),))
                         o = o[Depth(Near(unidepths))]
                         layernames = layernames[Depth(Near(unidepths))]
                         layernums = layernums[Depth(Near(unidepths))]
@@ -109,9 +100,10 @@ begin
                         o = set(o, Depth => unidepths)
                     end
                     coeffs = map(coeffs, streamlinedepths, layerinfo) do o, s, l
-                        o = set(o, Depth => s)
-                        layernames = ToolsArray(l[1], (Depth(lookup(o, Depth)),))
-                        layernums = ToolsArray(l[3], (Depth(lookup(o, Depth)),))
+                        p = sortperm(s) # streamline depths are per-channel, not depth-ordered; sort so `Near` works
+                        o = set(o[Depth(p)], Depth => s[p])
+                        layernames = ToolsArray(l[1][p], (Depth(lookup(o, Depth)),))
+                        layernums = ToolsArray(l[3][p], (Depth(lookup(o, Depth)),))
                         o = o[Depth(Near(unidepths))]
                         layernames = layernames[Depth(Near(unidepths))]
                         layernums = layernums[Depth(Near(unidepths))]
@@ -119,9 +111,10 @@ begin
                         o = set(o, Depth => unidepths)
                     end
                     chi = map(chi, streamlinedepths, layerinfo) do o, s, l
-                        o = set(o, Depth => s)
-                        layernames = ToolsArray(l[1], (Depth(lookup(o, Depth)),))
-                        layernums = ToolsArray(l[3], (Depth(lookup(o, Depth)),))
+                        p = sortperm(s) # streamline depths are per-channel, not depth-ordered; sort so `Near` works
+                        o = set(o[Depth(p)], Depth => s[p])
+                        layernames = ToolsArray(l[1][p], (Depth(lookup(o, Depth)),))
+                        layernums = ToolsArray(l[3][p], (Depth(lookup(o, Depth)),))
                         o = o[Depth(Near(unidepths))]
                         layernames = layernames[Depth(Near(unidepths))]
                         layernums = layernums[Depth(Near(unidepths))]
@@ -129,9 +122,10 @@ begin
                         o = set(o, Depth => unidepths)
                     end
                     S = map(S, streamlinedepths, layerinfo) do o, s, l
-                        o = set(o, Depth => s)
-                        layernames = ToolsArray(l[1], (Depth(lookup(o, Depth)),))
-                        layernums = ToolsArray(l[3], (Depth(lookup(o, Depth)),))
+                        p = sortperm(s) # streamline depths are per-channel, not depth-ordered; sort so `Near` works
+                        o = set(o[Depth(p)], Depth => s[p])
+                        layernames = ToolsArray(l[1][p], (Depth(lookup(o, Depth)),))
+                        layernums = ToolsArray(l[3][p], (Depth(lookup(o, Depth)),))
                         o = o[Depth(Near(unidepths))]
                         layernames = layernames[Depth(Near(unidepths))]
                         layernums = layernums[Depth(Near(unidepths))]
@@ -156,10 +150,10 @@ begin
                         ),
                         (Dim{:depths}(unidepths), SessionID(sessions))
                     )
-                    mad = stack(SessionID(sessions), out, dims = 3) .|> Float32
-                    coeffs = stack(SessionID(sessions), coeffs, dims = 2) .|> Float32
-                    chi = stack(SessionID(sessions), chi, dims = 2) .|> Float32
-                    S = stack(SessionID(sessions), S, dims = 3) .|> Float32
+                    mad = cat(out...; dims = SessionID(sessions)) .|> Float32
+                    coeffs = cat(coeffs...; dims = SessionID(sessions)) .|> Float32
+                    chi = cat(chi...; dims = SessionID(sessions)) .|> Float32
+                    S = cat(S...; dims = SessionID(sessions)) .|> Float32
                     layernums = parselayernum.(layernames)
                     return mad, coeffs, S, chi, layernames, layernums
                 end
@@ -202,7 +196,28 @@ begin
                 end
                 S̄ = ToolsArray(S̄ |> collect, (Structure(lookup(Q, Structure)),))
                 S = ToolsArray(S |> collect, (Structure(lookup(Q, Structure)),))
-                layerints = load(calcdir("plots", "grand_unified_layers.jld2"), "layerints")
+                begin # * Grand unified layers (moved from filter_sessions_posthoc): each cortical layer's
+                    # normalized-depth span, pooled as min..max across structures and good sessions.
+                    layerints = map(WRExperiment.layers) do _l
+                        spans = Float64[]
+                        for ln in layernames # per structure: depths × (good) sessions of layer-name strings
+                            ds = collect(lookup(ln)[1])
+                            for j in axes(ln, 2)
+                                mask = occursin.(_l, parent(ln)[:, j])
+                                any(mask) && append!(spans, collect(extrema(ds[mask])))
+                            end
+                        end
+                        minimum(spans) .. maximum(spans) # ponytail: assumes each layer appears in ≥1 good session
+                    end
+                    @assert length(layerints) == length(WRExperiment.layers)
+                    if stimulus == r"Natural_Images" # save once; layer anatomy is stimulus-independent
+                        mkpath(DrWatson.datadir("plots"))
+                        tagsave(
+                            DrWatson.datadir("plots", "grand_unified_layers.jld2"),
+                            Dict("layerints" => layerints)
+                        )
+                    end
+                end
             end
 
             coeffs = ToolsArray(collect(coeffs), (Structure(structures),))
@@ -239,20 +254,19 @@ begin
     end
 end
 begin
-    # ============================================================================ #
-    # Step 2: Fano factor data (from fano_factors.jl)
-    # ============================================================================ #
+
+
     fano_data, _ = produce_or_load(
-        Dict(), calcdir("plots");
+        Dict(), DrWatson.datadir();
         filename = savepath("fano_factor")
     ) do _
         session_table = load(
-            calcdir("plots", "posthoc_session_table.jld2"),
+            DrWatson.datadir("session_table.jld2"),
             "session_table"
         )
         oursessions = session_table.ecephys_session_id
-        path = calcdir("madev")
-        QQ = calcquality(path)
+        path = DrWatson.datadir("calculations")
+        QQ = WRExperiment.calcquality(path)
         plot_data = map(stimuli) do stimulus
             Q = QQ[
                 stimulus = At(stimulus),
@@ -297,13 +311,11 @@ begin
     end
 end
 begin
-    # ============================================================================ #
-    # Step 3: Spectral exponent data (from fig2_reduced.jl / spectral_exponent.jl)
-    # ============================================================================ #
+
+
     stimuli_str = ["r\"Natural_Images\"", "spontaneous", "flash_250ms"]
 
-    data_file = savepath("mad_psd.jld2")(Dict())
-    fig2_data = load(datadir("plots", data_file))
+    fig2_data = load(datadir("mad_psd.jld2")) # block 1 saved this under datadir() via produce_or_load
 
     spectral_exponents = Dict{String, Any}()
     spectral_curves = Dict{String, Any}()
@@ -325,9 +337,11 @@ begin
                 a = median(a, dims = Depth)
                 a = .-dropdims(a, dims = Depth)
             end
-            _b = ToolsArray(_b, (Structure(structures),)) |> stack
+            common = intersect(lookup.(_b, SessionID)...) # structures keep different session subsets; align to shared
+            _b = map(p -> p[SessionID = At(common)], _b)
+            _b = cat(_b...; dims = Structure(structures))
         end
-        _b = ToolsArray(_b, (Dim{:layer}(2:5),)) |> stack
+        _b = cat(_b...; dims = Dim{:layer}(2:5))
 
         spectral_exponents[string(stimulus)] = _b
 
@@ -342,11 +356,6 @@ begin
             σh = map(x -> quantile(x[:], 0.75), eachslice(s, dims = 𝑓)) |> ustripall
             f = collect(freqs(μ))
 
-            # Peaks
-            pks, proms = findpeaks(μ, 2; N = 2)
-            peak_freqs = collect(freqs(pks))
-            peak_vals = collect(pks)
-
             # MAPPLE fit
             ff, ps = WRExperiment.mapple_fit(μ)
             mapple = collect(ff.(f))
@@ -358,7 +367,7 @@ begin
             psd_per_structure[structure] = (;
                 f, μ = collect(μ), σl = collect(σl),
                 σh = collect(σh),
-                peak_freqs, peak_vals, mapple,
+                mapple,
                 spectral_exponent_median,
             )
         end
@@ -366,9 +375,7 @@ begin
         @info "Extracted spectral data for $stimulus: size = $(size(_b))"
     end
 
-    # ============================================================================ #
-    # Step 4: Compute fano factor slopes per layer (from fano_factors.jl)
-    # ============================================================================ #
+
     fanorange = 10^(1.5) .. 1.0e3
     fano_slopes = Dict{String, Any}()
 
@@ -416,9 +423,7 @@ begin
         @info "Computed fano slopes for $stim_str: size = $(size(_c))"
     end
 
-    # ============================================================================ #
-    # Step 5: Compute diffusion exponent hierarchical correlations (from fig2_mad.jl)
-    # ============================================================================ #
+
     diffusion_hierarchical = Dict{String, Any}()
 
     for stimulus in stimuli
@@ -428,7 +433,8 @@ begin
         N = 10000
         method = :group
         χ = coeffs
-        coeffs_indexed = getindex.(coeffs, [SessionID(At(oursessions))])
+        common = intersect(lookup.(coeffs, SessionID)...) # structures keep different session subsets; align to shared
+        coeffs_indexed = getindex.(coeffs, [SessionID(At(common))])
         coeffs_indexed = coeffs_indexed[Structure = At(structures)]
 
         unidepths = commondepths(lookup.(χ, [Depth]))
@@ -436,7 +442,7 @@ begin
 
         unichi = getindex.(coeffs_indexed, [Depth(Near(unidepths))])
         unichi = set.(unichi, [Depth => unidepths])
-        y = stack(Structure(structures), unichi)
+        y = cat(unichi...; dims = Structure(structures))
 
         μ, σ, 𝑝 = hierarchicalkendall(x, y, method; N)
 
@@ -444,9 +450,7 @@ begin
         @info "Computed hierarchical correlation for $stim_str"
     end
 
-    # ============================================================================ #
-    # Step 6: Pre-compute MAD curves for plotting (from fig2_mad.jl VISp L2/3 panel)
-    # ============================================================================ #
+
     mad_curves = Dict{String, Any}()
 
     for stimulus in stimuli
@@ -489,9 +493,7 @@ begin
         @info "Pre-computed MAD curve for $stim_str: slope = $meanslope"
     end
 
-    # ============================================================================ #
-    # Step 7: Pre-compute Fano factor curves for plotting (from fano_factors.jl VISp L2/3 panel)
-    # ============================================================================ #
+
     fano_curves = Dict{String, Any}()
 
     for stimulus in stimuli
@@ -554,10 +556,8 @@ begin
         end
     end
 
-    # ============================================================================ #
-    # Step 8: Save all plot data
-    # ============================================================================ #
-    outpath = datadir("plots", "WRExperiment.jld2")
+
+    outpath = datadir("WRExperiment.jld2")
     mkpath(dirname(outpath))
     @info "Saving all plot data to $outpath"
 

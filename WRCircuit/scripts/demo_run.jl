@@ -22,6 +22,7 @@ begin
     begin # FNS parameters
         rho = 20000
         dx = 0.5
+        delta = 3.5
         sigma_ee = 0.06  # from decay=7.5
         sigma_ei = 0.07  # from decay=9.5
         sigma_ie = 0.14  # from decay=19
@@ -37,11 +38,12 @@ begin
 end
 
 begin
-    tmax = 55u"s"
+    tmax = 25u"s" #55u"s"
     tmin = 5u"s" # The transient. Simulations always begin at 0
     fixed_params = (;
         rho,
         dx,
+        delta,
         sigma_ee,
         sigma_ei,
         sigma_ie,
@@ -59,12 +61,6 @@ end
 
 begin # * Run simulation
     m = model(; fixed_params...)
-    # Record E fully (spike/V/input) but only I spikes: the full E trace stays in memory for the
-    # statistics below, while I contributes just a sparse raster --- so recording never holds a second
-    # full trace. Only the last-5s slice is written to disk (see the raw-save block near the end).
-    # Scope the TerminalLogger here so the GPU progress bar renders. It must NOT be the global logger
-    # (a custom global logger crashes GPU kernel compilation via GPUCompiler's min_enabled_level
-    # introspection); with_logger sets it task-locally, which is world-safe. See startup.jl.
     sol = with_logger(TerminalLogger()) do
         simulate(
             m, tmax; populations = [:E, :I],
@@ -77,11 +73,6 @@ begin # * Run simulation
     ipositions = [collect(pos) for pos in sol[:I].positions]
 end
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Derived statistics (Fano factor, spectra/MAD, and their fits) precomputed here
-# and saved so that scripts/plots/plot_critical_demo.jl can load them directly
-# rather than recomputing over the 24 GB raw trace.
-# ──────────────────────────────────────────────────────────────────────────────
 
 # * Mean spectrum/MAD fits (median across neurons)
 function fit_spectrum(s; components, peaks, f_range)
@@ -142,9 +133,6 @@ function fit_mads(s::AbstractMatrix; kwargs...)
     end
 end
 
-# Density histogram over `edges` accumulated from an iterator of value-chunks (e.g. per-neuron columns),
-# so nothing full-size is ever materialised --- one StatsBase.Histogram per chunk, merged, then
-# normalised to a PDF. Returns the same ToolsArray form as `histcounts` (bin centre -> density).
 function stream_hist(chunks, edges)
     H = nothing
     for c in chunks
@@ -159,7 +147,7 @@ begin # * Fano factor
     @info "Calculating Fano factor"
     spikes = x[Population = At(:E), Var = At(:spike)]
     dt = step(spikes)
-    τs = logrange(dt * 10 |> ustrip, dt * 1000 |> ustrip, length = 200) # ms
+    τs = logrange(dt * 10 |> ustrip, dt * 10000 |> ustrip, length = 200) # ms
     fano = fano_factor(ustripall(spikes), τs)
 
     mfano = map(Chart(ProgressLogger(), Threaded()), eachcol(fano)) do x
@@ -273,7 +261,7 @@ begin # * Save the last 5 s of raw data (traces, input field, E/I raster) --- no
 end
 
 begin # * Save derived statistics
-    statsfile = datadir("critical_demo_stats.jld2")
+    statsfile = datadir("demo_run_stats.jld2")
     @info "Saving derived statistics to $(statsfile)"
     jldsave(
         statsfile;

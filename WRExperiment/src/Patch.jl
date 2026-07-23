@@ -61,6 +61,7 @@ end
 # NOTE: MAPPLE's `fit!` lives in TimeseriesTools' OptimExt --- needs Optim + ForwardDiff loaded or it NaNs.
 function mapple_fit(x; kwargs...)
     p = logsample(ustripall(x)[𝑓 = PSD_RANGE[1] .. PSD_RANGE[2]])
+    p = p ./ maximum(p) # lift off eps(Float32): raw PSD (~1e-12 V²/Hz) underflows MAPPLE's _safelog10 floor; β is scale-invariant
     m = fit(MAPPLE, p; components = 1, peaks = 2)  # 2 peaks: absorb both the ~7 Hz and gamma bumps (FOOOF removed up to 8) so the aperiodic slope isn't biased
     fit!(m, p)
     β = last(m.params.components.β)
@@ -378,6 +379,20 @@ GAMMA() = (30, 100)
 CLUSTER() = get(ENV, "SM_CLUSTER", "false") == "true"   # are we running on the cluster?
 const DEFAULT_SESSION_ID = 1140102579
 
+function commondepths(depths)
+    # A common range of 20 normalized depths approximating the collection (SM Utils.commondepths;
+    # ponytail: dropped SM's dead `N`/filter lines --- the range only depends on the median bounds).
+    lo = ceil(median(minimum.(depths)), sigdigits = 2)
+    hi = floor(median(maximum.(depths)), sigdigits = 2)
+    return range(lo, hi, length = 20)
+end
+
+function parselayernum(layername) # SM Utils.parselayernum: leading digits, 0 if none, merge layers 2 and 3
+    m = match(r"\d+", layername)
+    m = m === nothing ? 0 : parse(Int, m.match)
+    return m > 2 ? m - 1 : m
+end
+
 # Trimmed replacement for SpatiotemporalMotifs' bulk-import `@preamble` macro: only the packages that are
 # actually WRExperiment deps and used by the scripts (dropped the 7 unused heavy pkgs + SM internals the
 # original pulled in). Expands in the calling script's scope, like the original.
@@ -497,8 +512,10 @@ Check the quality of a calculations directory e.g. `data/madev`. Copied from Spa
 (part of dropping the SM dep).
 """
 function calcquality(
-        dirname, calctype::Symbol = (Symbol ∘ last ∘ splitpath)(dirname);
-        suffix = "jld2", connector = connector, require = true
+        dirname;
+        suffix = "jld2",
+        connector = connector,
+        require = true
     )
     if isempty(readdir(dirname))
         return []
@@ -525,7 +542,7 @@ function calcquality(
                     if require
                         canload = jldopen(f, "r"; iotype = IOStream) do fl
                             # fl["performance_metrics"] # Can load
-                            return has_calc_keys(Val(calctype), fl) &&
+                            return has_calc_keys(fl) &&
                                 has_keys(fl, string.(_require))
                         end
                     else
@@ -590,7 +607,7 @@ function calcquality(
     return Q
 end
 
-function has_calc_keys(calctype::Val{:madev}, D)
+function has_calc_keys(D)
     required_keys = [
         "S",
         "mad",

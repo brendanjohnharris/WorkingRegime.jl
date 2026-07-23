@@ -6,6 +6,7 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 using DrWatson
 @quickactivate "WorkingRegime"
 using JLD2
+using TimeseriesTools
 using CairoMakie
 using Fathom
 using Statistics
@@ -49,69 +50,14 @@ const ARROW_ORIGIN = (0.55, -1.75)
 const outdir = plotsdir("hierarchical_variation")
 mkpath(outdir)
 
-struct NamedArray{T, N}
-    data::Array{T, N}
-    dims::Vector{Pair{Symbol, Vector}}
-end
-Base.collect(x::NamedArray) = x.data
+# Stored ToolsArrays/DimArrays load as real DimArrays via TimeseriesBase's `toolsarray_typemap`; custom
+# dims absent from this project (Structure, SessionID, α, ...) come back as generic `Dim{:name}` with
+# lookups intact, so we index them by name.
+"Index by named values along one or more dims (returns the slice)."
+_select(x, selectors::Pair...) = getindex(x; (Symbol(n) => At(v) for (n, v) in selectors)...)
 
-function _dim_name(d)
-    tname = string(typeof(d).parameters[1])
-    head = first(split(tname, ('{', ',', ' ')))
-    if head == "Dim"
-        inner = split(tname, '{'; limit = 2)[2]
-        return Symbol(first(split(inner, (',', '}'))))
-    end
-    return Symbol(head)
-end
-_dim_lookup(d) = collect(d.val.data)
-function _try_dim_pair(d)
-    try
-        return _dim_name(d) => _dim_lookup(d)
-    catch
-        return nothing
-    end
-end
-function JLD2.rconvert(::Type{<:NamedArray}, x)
-    outer = Pair{Symbol, Vector}[]
-    for d in x.dims
-        p = _try_dim_pair(d)
-        p === nothing || push!(outer, p)
-    end
-    return NamedArray(collect(x.data), outer)
-end
-const _toolsarray_typemap = Dict(
-    # WRExperiment.jld2 was saved when ToolsArray lived under TimeseriesTools;
-    # circuit_exponents.jld2 was saved after the refactor, so its inner cells use
-    # the new TimeseriesBase.ToolsArrays path. Its outer grid is a plain
-    # DimensionalData.DimArray (built from Iterators.product). Upgrade all three
-    # to the same NamedArray shim.
-    "TimeseriesTools.ToolsArray" => JLD2.Upgrade(NamedArray),
-    "TimeseriesBase.ToolsArrays.ToolsArray" => JLD2.Upgrade(NamedArray),
-    "DimensionalData.DimArray" => JLD2.Upgrade(NamedArray)
-)
-
-"Index a NamedArray by named values along one or more dims (returns the slice)."
-function _select(x::NamedArray, selectors::Pair...)
-    idxs = Any[Colon() for _ in x.dims]
-    for (name, val) in selectors
-        i = findfirst(d -> d.first == Symbol(name), x.dims)
-        i === nothing && error("Dim $name not in $(first.(x.dims))")
-        j = findfirst(==(val), x.dims[i].second)
-        j === nothing && error("Value $val not in $(x.dims[i].first) lookup")
-        idxs[i] = j
-    end
-    return x.data[idxs...]
-end
-
-"Pick one element of a NamedArray whose elements are themselves NamedArrays."
-function _select_outer(x::NamedArray, dimname::Symbol, val)
-    i = findfirst(d -> d.first == dimname, x.dims)
-    i === nothing && error("Dim $dimname not in $(first.(x.dims))")
-    j = findfirst(==(val), x.dims[i].second)
-    j === nothing && error("Value $val not in $(x.dims[i].first) lookup")
-    return x.data[j]
-end
+"Pick one element of an array whose elements are themselves arrays."
+_select_outer(x, dimname::Symbol, val) = _select(x, dimname => val)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap median + 95% CI across sessions
@@ -135,7 +81,7 @@ end
 const inpath = projectdir("WRExperiment", "data", "plots", "WRExperiment.jld2")
 plot_data = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), inpath;
-    typemap = _toolsarray_typemap
+    typemap = toolsarray_typemap
 )
 
 # Circuit per-neuron exponent grids — three planes through the working-regime
@@ -144,13 +90,13 @@ plot_data = jldopen(
 const circuit_path = projectdir("WRCircuit", "data", "circuit_exponents.jld2")
 circuit = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), circuit_path;
-    typemap = _toolsarray_typemap
+    typemap = toolsarray_typemap
 )
 
 "NaN-aware median of one cell's per-neuron exponents POOLED across all seeds (the
 trailing grid axis). Each (axis₁, axis₂, seed) cell may be a plain `Vector{Float64}`
-(the empty-cell sentinel `Float64[]`) or a `NamedArray` (the typemap-upgraded
-per-neuron `ToolsArray`); `collect` normalises both. Empty cells stay NaN."
+(the empty-cell sentinel `Float64[]`) or a `ToolsArray` (the typemap-upgraded
+per-neuron array); `collect` normalises both. Empty cells stay NaN."
 function seed_pooled_median(cells)
     n1, n2 = size(cells, 1), size(cells, 2)
     out = Matrix{Float64}(undef, n1, n2)
@@ -166,8 +112,8 @@ end
 # δ/τ_d plane (delta × tau_d_e): the joint E/I-ratio × excitatory-decay plane, sliced to the δ ROI
 # (critical region through the working point) × the τ_d ROI. Reads its own lookups (dtd_delta, dtd_tau_d_e).
 # The map calls are wrapped in `invokelatest` for Julia 1.12's stricter world-age rules on top-level globals.
-const _A_dtd_full = Base.invokelatest(seed_pooled_median, circuit["a_dtd"].data)
-const _B_dtd_full = Base.invokelatest(seed_pooled_median, circuit["b_dtd"].data)
+const _A_dtd_full = Base.invokelatest(seed_pooled_median, parent(circuit["a_dtd"]))
+const _B_dtd_full = Base.invokelatest(seed_pooled_median, parent(circuit["b_dtd"]))
 const δ_dtd_lookup = collect(circuit["dtd_delta"])
 const τd_dtd_lookup = collect(circuit["dtd_tau_d_e"])
 const δ_dtd_keep = findall(v -> DELTA_MIN <= v <= DELTA_MAX, δ_dtd_lookup)
@@ -252,7 +198,7 @@ const bfns_path = projectdir(
 )
 bfns = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), bfns_path;
-    typemap = _toolsarray_typemap
+    typemap = toolsarray_typemap
 )
 
 "NaN-aware mean over a collection; empty / all-NaN → NaN."
@@ -261,19 +207,18 @@ function _nanmean(x)
     return isempty(v) ? NaN : mean(v)
 end
 
-"Collapse a (α, β, γ, η, Obs) sweep NamedArray to a 2-D (α, β) grid by NaN-aware
+"Collapse a (α, β, γ, η, Obs) sweep array to a 2-D (α, β) grid by NaN-aware
 averaging over every axis after the first two (γ, η singletons + Obs seeds)."
-function _ab_grid(na::NamedArray)
-    da = na.data
+function _ab_grid(na)
+    da = parent(na)
     colons = ntuple(_ -> Colon(), ndims(da) - 2)
     return [_nanmean(@view da[i, j, colons...]) for i in axes(da, 1), j in axes(da, 2)]
 end
 
 "Lookup vector for dim `name`; falls back to `default` if the typemap dropped the
 dim name (e.g. a custom Obs dim whose name fails to parse)."
-function _dimlookup(na::NamedArray, name::Symbol, default)
-    i = findfirst(d -> d.first == name, na.dims)
-    return collect(i === nothing ? default : na.dims[i].second)
+function _dimlookup(na, name::Symbol, default)
+    return collect(hasdim(na, name) ? lookup(na, name) : default)
 end
 
 const _α_lookup = _dimlookup(bfns["diffusion_exponent"], :α, range(1.2, 2.0, length = 32))
@@ -301,13 +246,13 @@ const β_dir = mean_direction(
 # Per-region (a, b) at a chosen cortical layer — bootstrap median over sessions
 # ──────────────────────────────────────────────────────────────────────────────
 
-# coeffs_median: NamedArray{Structure} of NamedArray{layer, SessionID}
+# coeffs_median: ToolsArray{Structure} of ToolsArray{layer, SessionID}
 function region_a(structure, layer_idx)
     cm = plot_data["madev_data"][stim]["coeffs_median"]
     inner = _select_outer(cm, :Structure, structure)
     return collect(_select(inner, :layer => layer_idx))
 end
-# spectral_exponents: NamedArray{Structure, layer, SessionID}
+# spectral_exponents: ToolsArray{Structure, layer, SessionID}
 region_b(s, layer_idx) = collect(
     _select(
         plot_data["spectral_exponents"][stim],
