@@ -99,8 +99,8 @@ begin  # * Spike raster (E + I)
 end
 
 
-begin # * Load precomputed statistics (computed in scripts/plots/critical_demo.jl)
-    statsfile = datadir("critical_demo_stats.jld2")
+begin # * Load precomputed statistics (computed in scripts/demo_run.jl)
+    statsfile = datadir("demo_run_stats.jld2")
     fano = load(statsfile, "fano")
     mfano = load(statsfile, "mfano")
     spectra = load(statsfile, "spectra")
