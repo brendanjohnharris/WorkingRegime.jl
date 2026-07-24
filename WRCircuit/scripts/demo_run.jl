@@ -22,7 +22,7 @@ begin
     begin # FNS parameters
         rho = 20000
         dx = 0.5
-        delta = 3.25
+        delta = 3.75
         sigma_ee = 0.06  # from decay=7.5
         sigma_ei = 0.07  # from decay=9.5
         sigma_ie = 0.14  # from decay=19

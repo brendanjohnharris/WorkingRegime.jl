@@ -1,18 +1,18 @@
 
 === Variable: V ===
 -- Spectrum fit --
-(average = -1.6791470021259696, confint = (lower = -1.6957303998258109, upper = -1.6661665871209388))
+(average = -1.8279300628488566, confint = (lower = -1.846084977767594, upper = -1.818390875274247))
 -- MAD fit --
-(average = 1.1120716427618935, confint = (lower = 1.0888977025014313, upper = 1.127552349632703))
+(average = 1.5237361408514225, confint = (lower = 1.51723693840937, upper = 1.5279213133300806))
 
 === Variable: LFP ===
 -- Spectrum fit --
-(average = -2.3071455104518495, confint = (lower = -2.6203765499308367, upper = -2.269366476112077))
+(average = -2.42453584329884, confint = (lower = -2.453156663466431, upper = -2.336392461457724))
 -- MAD fit --
-(average = 0.9123712242086448, confint = (lower = 0.8346239458304446, upper = 0.9495174398610157))
+(average = 1.3988610060850892, confint = (lower = 0.8681561572996547, upper = 1.6818294867673513))
 
 === Variable: input ===
 -- Spectrum fit --
-(average = -1.618539715472206, confint = (lower = -1.6285790773980708, upper = -1.605564086119463))
+(average = -1.8001556880701437, confint = (lower = -1.8074497888860999, upper = -1.7941959613731773))
 -- MAD fit --
-(average = 0.6585900536156243, confint = (lower = 0.6518039366979654, upper = 0.6656592038849755))
+(average = 0.725308406515004, confint = (lower = 0.7241738485420203, upper = 0.7261761515993583))
