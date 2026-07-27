@@ -10,7 +10,7 @@ import AcademicClusters.NCIGadi: runscripts
 
 delta = round.(range(2.5, 4, step = 0.025); sigdigits = 4)
 Delta_g_K = round.(range(0, 0.005, length = 26); sigdigits = 4)
-sigma_ee = round.(range(0.03, 0.075, step=0.001); sigdigits = 4)
+sigma_ee = round.(range(0.03, 0.075, step = 0.001); sigdigits = 4)
 tau_r_e = round.(range(0.5, 2.0, length = 31); sigdigits = 4)
 tau_d_e = round.(range(4, 6, step = 0.025); sigdigits = 4)
 
