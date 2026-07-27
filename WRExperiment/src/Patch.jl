@@ -17,6 +17,19 @@ import HypothesisTests: MannWhitneyUTest, SignedRankTest, pvalue
 
 const PSD_RANGE = [3, 1000]
 
+# Band over which the diffusion exponent is fit, IN SECONDS (the LFP lag axis is in seconds; the
+# circuit's `WRCircuit.MAD_BAND_MS` is in milliseconds, so the numeric values differ by 1000x even
+# though they denote the SAME physical band).
+#
+# 0.8-8 ms: the first decade of the lag grid, from one sample at 1250 Hz to a decade later. The
+# circuit is fit over this identical band, so the two exponents are the same quantity. A model-free
+# knee (the lag at which the local slope falls to half its short-lag value) sits at 8.8 ms median
+# across sessions, IQR 7.6-10.4, so the band ends essentially at the edge of the scaling regime.
+# NB it is that model-free estimate the band is justified against, NOT `breakfrequencies` of a
+# 2-component fit: the latter's threshold is (β₁+β₂)/2, which moves with the unstable fitted
+# exponents and scatters over 4x, so it is not a usable knee on these curves.
+const MAD_BAND = [0.0, 8.0e-3]
+
 function produce_unitdepths(session::AN.AbstractSession)
     sessionid = AN.getid(session)
     @info "Computing depths for session $sessionid"
@@ -70,13 +83,60 @@ function mapple_fit(x; kwargs...)
 end
 
 # Diffusion exponent via MAPPLE (matches WRCircuit's `diffusion_exponents`): the first component of a
-# 2-component MAPPLE fit to the MAD curve. Replaces the old fixed-band OLS log-log slope, so the data `a`
-# uses the same estimator as the circuit (no more A_OFFSET_DEMO). Same positive sign as the OLS slope.
-function diffusion_fit(mad_col)
+"""
+    diffusion_fit(mad_col; band = MAD_BAND)
+
+Diffusion exponent: the slope of a 1-component MAPPLE fit to the MAD curve restricted to `band`
+(seconds). One component means the model is a single power law, so `β` IS the log-log slope of the
+band, with no breakpoint and no crossfade for a second component to leak through.
+
+The restriction is the point. A 2-component fit over the full 0.8-1000 ms curve returns a `first(β)`
+that is the τ→0 asymptote of a segment blended with its neighbour, not a slope the data exhibits
+anywhere (0.756 against a true band slope of ~0.52). The MAD saturates by ~60 ms, so two of the
+three decades carry no exponent; `band` keeps the fit inside the scaling regime. Use
+[`diffusion_knee`](@ref) to confirm per curve that the band ends before the knee.
+
+`w = true` weights by log-spacing: after rounding to whole samples the short lags land on
+consecutive integers (linearly spaced) while long lags stay log-spaced, so an unweighted fit would
+be dominated by the log-denser upper end of the band. Requires TimeseriesTools with `logweights`.
+"""
+function diffusion_fit(mad_col; band = MAD_BAND)
+    y = ustripall(mad_col)[𝑡 = band[1] .. band[2]]
+    m = fit(MAPPLE, y; components = 1, peaks = 0)
+    fit!(m, y; w = true)
+    return first(m.params.components.β)
+end
+
+"""
+    diffusion_knee(mad_col)
+
+Crossover lag (seconds) where the MAD curve leaves its scaling regime: the first breakpoint of an
+unconstrained 2-component MAPPLE fit over the whole curve. Fit separately from
+[`diffusion_fit`](@ref) and used only to locate the knee, never to read an exponent off; the free
+breakpoint moves with the model order, so the segment slopes either side of it are not stable
+quantities, whereas the knee itself is.
+"""
+function diffusion_knee(mad_col)
     y = ustripall(mad_col)
     m = fit(MAPPLE, y; components = 2, peaks = 0)
-    fit!(m, y)
-    return first(m.params.components.β)
+    fit!(m, y; w = true)
+    return first(breakfrequencies(m))
+end
+
+# Warn if the exponent band runs past the knee on a meaningful fraction of curves: the band is only
+# defensible while it stays inside the scaling regime, and that is an empirical claim per dataset.
+function confirm_band_before_knee(knees, band = MAD_BAND; tol = 0.05)
+    k = filter(isfinite, collect(knees))
+    isempty(k) && return NaN
+    bad = count(<(band[2]), k) / length(k)
+    if bad > tol
+        @warn "Diffusion band ends after the knee on $(round(100bad; digits = 1))% of curves; \
+               the exponent is being read partly past the scaling regime" band median_knee = median(k)
+    else
+        @info "Diffusion band OK: knee median $(round(1000median(k); digits = 2)) ms vs band end \
+               $(1000band[2]) ms ($(round(100bad; digits = 1))% of curves knee early)"
+    end
+    return median(k)
 end
 
 # 1-D connected components: id increments at each change (replaces ImageMorphology.label_connected_components).
@@ -257,9 +317,15 @@ function send_madev(
             # end
         end
 
-        taus = range(-3, 0, 50)
-        taus = exp10.(taus)
-        mad = madev(LFP |> ustripall, sort(unique(taus)))
+        # `madev` rounds each requested lag to a whole number of samples but labels the result with the
+        # REQUESTED τ, so a log grid finer than the sample period returns tied values at a moving x (at
+        # 1250 Hz the 1-3 ms points collapse onto lags 1, 2, 3). Build the grid from DISTINCT integer
+        # lags instead, as WRCircuit does, so every point is an independent measurement at its true lag.
+        lfp = LFP |> ustripall            # dt from the same object madev sees, so the two agree by construction
+        dt = TimeseriesTools.samplingperiod(lfp)
+        taus = unique(round.(Int, exp10.(range(-3, 0, 50)) ./ dt))
+        taus = filter(>=(1), taus) .* dt
+        mad = madev(lfp, taus)
         depths = AN.getchanneldepths(session, LFP; method = :probe)
         mad = set(mad, Chan => Depth(depths))
         # mad_fit = mad[𝑡 = pass[1] .. pass[2]]
@@ -269,6 +335,12 @@ function send_madev(
 
         # * Full fit (per-channel MAPPLE diffusion exponent)
         coeffs = map(diffusion_fit, eachslice(mad, dims = 2))
+
+        # * Knee per channel, from an unconstrained 2-component fit. Saved as an observable in its
+        #   own right (it is the crossover out of the scaling regime) and used to confirm the
+        #   exponent band sits before it.
+        knees = map(diffusion_knee, eachslice(mad, dims = 2))
+        confirm_band_before_knee(knees)
 
         # * Spectral fit (per-channel MAPPLE aperiodic exponent; moved here from collect_calculations so a and
         #   b are both fit at the source, parallel across the session-level distributed jobs). Only χ is used.
@@ -343,6 +415,7 @@ function send_madev(
             "mad" => mad .|> Float32,
             "coeff" => coeff .|> Float32,
             "coeffs" => coeffs .|> Float32,
+            "knees" => knees .|> Float32,  # crossover lag (s) per channel, unconstrained 2-comp fit
             "chi" => chi .|> Float32,      # spectral MAPPLE exponent per channel
             "unitdepths" => unitdepths,
             # "plotfiles" => relpath.([plotfile], [projectdir()])
@@ -613,6 +686,7 @@ function has_calc_keys(D)
         "mad",
         "coeff",
         "coeffs",
+        "knees",
         "chi",
         "unitdepths",
         # "plotfiles",

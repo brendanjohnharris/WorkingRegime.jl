@@ -232,7 +232,17 @@ end
 # Per-neuron exponent fits (MAPPLE)
 # ──────────────────────────────────────────────────────────────────────────────
 
-export per_neuron, diffusion_exponents, spectral_exponents
+export per_neuron, diffusion_exponents, diffusion_knees, spectral_exponents
+
+# Band over which the diffusion exponent is fit, IN MILLISECONDS (the circuit's MAD lag axis is in
+# ms; WRExperiment's is in seconds, so the numeric values there and here differ by 1000x even though
+# they denote the SAME physical band).
+#
+# 0.8-8 ms: the first decade of the *experimental* lag grid, from one LFP sample at 1250 Hz to a
+# decade later. The circuit is fit over the identical physical band so the two exponents are the
+# same quantity; its own grid starts at 1 ms (10 steps at dt = 0.1 ms), so in practice it
+# contributes 1-8 ms and the lower edge never binds. Roughly 30 points here against the data's 10.
+const MAD_BAND_MS = [0.0, 8.0]
 
 """
     per_neuron(f, data; step = 1)
@@ -252,17 +262,41 @@ function per_neuron(f, data; step = 1)
 end
 
 """
-    diffusion_exponents(mad; step = 1)
+    diffusion_exponents(mad; step = 1, band = MAD_BAND_MS)
 
-Per-neuron diffusion exponents: the first component of a 2-component MAPPLE fit to
-each neuron's mean absolute displacement (MAD) curve. One value per fitted neuron.
+Per-neuron diffusion exponents: the slope of a 1-component MAPPLE fit to each neuron's mean
+absolute displacement (MAD) curve, restricted to `band` (milliseconds). One value per fitted neuron.
+
+One component means the model is a single power law, so `β` IS the log-log slope over the band.
+The previous 2-component form returned `first(β)`, the τ→0 asymptote of a segment that blends with
+its neighbour through a tanh crossfade; on curves where the fit chooses a wide transition that
+asymptote is not a slope the data exhibits anywhere. Restricting to the pre-knee decade removes
+both the breakpoint and the two saturated decades that carry no exponent. Mirrors
+`WRExperiment.diffusion_fit` exactly, so the circuit and data exponents are the same quantity.
+Use [`diffusion_knees`](@ref) to confirm the band ends before the knee.
 """
-function diffusion_exponents(mad; step = 1)
+function diffusion_exponents(mad; step = 1, band = MAD_BAND_MS)
+    return per_neuron(mad; step) do col
+        y = ustripall(col)[𝑡 = band[1] .. band[2]]
+        m = fit(MAPPLE, y; components = 1, peaks = 0)
+        fit!(m, y; w = true)
+        first(m.params.components.β)
+    end
+end
+
+"""
+    diffusion_knees(mad; step = 1)
+
+Per-neuron crossover lag (ms) where the MAD curve leaves its scaling regime: the first breakpoint
+of an unconstrained 2-component MAPPLE fit over the whole curve. Fit separately from
+[`diffusion_exponents`](@ref) and used only to locate the knee, never to read an exponent off.
+"""
+function diffusion_knees(mad; step = 1)
     return per_neuron(mad; step) do col
         y = ustripall(col)
         m = fit(MAPPLE, y; components = 2, peaks = 0)
-        fit!(m, y)
-        first(m.params.components.β)
+        fit!(m, y; w = true)
+        first(breakfrequencies(m))
     end
 end
 

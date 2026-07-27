@@ -28,9 +28,13 @@ scripts/calculations/float32_conversion.jl
 data/old/
 old_data/
 old_plots/
+Manifest.toml
 Manifest copy.toml
 .claude
 *.pdf
+submit.o*
+data
+LocalPreferences.toml
 
 WRCircuit/plots/
 WRCircuit/data/

@@ -8,11 +8,11 @@ DrWatson.@quickactivate :WRCircuit
 using WRCircuit
 import AcademicClusters.NCIGadi: runscripts
 
-delta = round.(range(2.5, 5, length = 51); sigdigits = 3)
-Delta_g_K = round.(range(0, 0.005, length = 26); sigdigits = 3)
-sigma_ee = round.(range(0.03, 0.075, length = 19); sigdigits = 3)
-tau_r_e = round.(range(0.5, 2.0, length = 31); sigdigits = 3)
-tau_d_e = round.(range(4, 6, length = 41); sigdigits = 3)
+delta = round.(range(2.5, 4, step = 0.025); sigdigits = 4)
+Delta_g_K = round.(range(0, 0.005, length = 26); sigdigits = 4)
+sigma_ee = round.(range(0.03, 0.075, step=0.001); sigdigits = 4)
+tau_r_e = round.(range(0.5, 2.0, length = 31); sigdigits = 4)
+tau_d_e = round.(range(4, 6, step = 0.025); sigdigits = 4)
 
 seeds = 1:10
 
@@ -20,12 +20,12 @@ PLANES = [
     # (:tau_r_e => tau_r_e, :tau_d_e => tau_d_e),        # τ_syn
     (:delta => delta, :tau_d_e => tau_d_e),           # δ/τ_d
     # (:delta => delta, :Delta_g_K => Delta_g_K),       # δ × Δg_K
-    # (:delta => delta, :sigma_ee => sigma_ee),         # δ × σ_ee
+    (:delta => delta, :sigma_ee => sigma_ee),         # δ × σ_ee
     # (:Delta_g_K => Delta_g_K, :sigma_ee => sigma_ee), # Δg_K × σ_ee
 ]
 
 if contains(gethostname(), "gadi")
-    batch = 92 # Ok for v100
+    batch = 100 # Ok for h200
     @info "Submitting sweep jobs to Gadi"
     setup = quote
         using DrWatson

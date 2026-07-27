@@ -211,9 +211,8 @@ begin
                     end
                     @assert length(layerints) == length(WRExperiment.layers)
                     if stimulus == r"Natural_Images" # save once; layer anatomy is stimulus-independent
-                        mkpath(DrWatson.datadir("plots"))
                         tagsave(
-                            DrWatson.datadir("plots", "grand_unified_layers.jld2"),
+                            DrWatson.datadir("grand_unified_layers.jld2"),
                             Dict("layerints" => layerints)
                         )
                     end
@@ -424,30 +423,34 @@ begin
     end
 
 
-    diffusion_hierarchical = Dict{String, Any}()
-
-    for stimulus in stimuli
-        stim_str = string(stimulus)
-        @unpack coeffs, oursessions = madev_data[stim_str]
-
-        N = 10000
-        method = :group
-        χ = coeffs
-        common = intersect(lookup.(coeffs, SessionID)...) # structures keep different session subsets; align to shared
-        coeffs_indexed = getindex.(coeffs, [SessionID(At(common))])
-        coeffs_indexed = coeffs_indexed[Structure = At(structures)]
-
+    # Kendall τ against the anatomical hierarchy at each depth, for any per-structure Depth×SessionID
+    # quantity. Structures are put on a shared session set and a shared depth grid first.
+    function hierarchical_tau(χ; N = 10000, method = :group)
+        common = intersect(lookup.(χ, SessionID)...) # structures keep different session subsets; align to shared
+        χ = getindex.(χ, [SessionID(At(common))])[Structure = At(structures)]
         unidepths = commondepths(lookup.(χ, [Depth]))
-        x = getindex.([hierarchy_scores], structures)
 
-        unichi = getindex.(coeffs_indexed, [Depth(Near(unidepths))])
+        unichi = getindex.(χ, [Depth(Near(unidepths))])
         unichi = set.(unichi, [Depth => unidepths])
         y = cat(unichi...; dims = Structure(structures))
 
+        x = getindex.([hierarchy_scores], structures)
         μ, σ, 𝑝 = hierarchicalkendall(x, y, method; N)
+        return (; μ, σ, 𝑝, unidepths)
+    end
 
-        diffusion_hierarchical[stim_str] = (; μ, σ, 𝑝, unidepths)
-        @info "Computed hierarchical correlation for $stim_str"
+    diffusion_hierarchical = Dict{String, Any}()
+    spectral_hierarchical = Dict{String, Any}()
+
+    for stimulus in stimuli
+        stim_str = string(stimulus)
+        @unpack coeffs, mapple = madev_data[stim_str]
+
+        diffusion_hierarchical[stim_str] = hierarchical_tau(coeffs)
+        # Negated to match spectral_exponents' sign (PSD ~ f^b with b < 0); τ flips with it.
+        spectral_hierarchical[stim_str] = hierarchical_tau(.-mapple["χ"])
+
+        @info "Computed hierarchical correlations for $stim_str"
     end
 
 
@@ -569,6 +572,7 @@ begin
         spectral_exponents,
         fano_slopes,
         diffusion_hierarchical,
+        spectral_hierarchical,
         mad_curves,
         fano_curves
     )

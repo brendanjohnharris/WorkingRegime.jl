@@ -3590,7 +3590,7 @@ weakdeps = ["TimeseriesTools"]
 
 [[deps.TimeseriesTools]]
 deps = ["ComponentArrays", "DimensionalData", "FFTW", "IntervalSets", "LinearAlgebra", "Normalization", "Peaks", "Random", "Reexport", "SparseArrays", "Statistics", "StatsAPI", "StatsBase", "TimeseriesBase", "Unitful"]
-git-tree-sha1 = "4151f6ecadf1eedcd878f14d7c8c33de9741b003"
+git-tree-sha1 = "eb5a8947aceacbb277eb83421e6ea089e3ac6a77"
 repo-rev = "main"
 repo-url = "https://github.com/brendanjohnharris/TimeseriesTools.jl"
 uuid = "380cddd1-6ef2-46ca-b087-e7151fb095ff"
