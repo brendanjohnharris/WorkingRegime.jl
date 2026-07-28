@@ -253,8 +253,6 @@ begin
     end
 end
 begin
-
-
     fano_data, _ = produce_or_load(
         Dict(), DrWatson.datadir();
         filename = savepath("fano_factor")

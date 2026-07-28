@@ -147,10 +147,12 @@ function send_sweep(ax1::Pair, ax2::Pair, seed; batch = SWEEP.B, path = datadir(
         # simulate_batch needs BOTH τ params together (or neither), so whenever either is swept pass both --- the
         # swept one per-member, the other as its scalar default (broadcast across the batch).
         if :tau_r_e in axes || :tau_d_e in axes
-            member = merge(member, (;
-                tau_r_e = :tau_r_e in axes ? [c.tau_r_e for c in chunk] : SWEEP.defaults0.tau_r_e,
-                tau_d_e = :tau_d_e in axes ? [c.tau_d_e for c in chunk] : SWEEP.defaults0.tau_d_e,
-            ))
+            member = merge(
+                member, (;
+                    tau_r_e = :tau_r_e in axes ? [c.tau_r_e for c in chunk] : SWEEP.defaults0.tau_r_e,
+                    tau_d_e = :tau_d_e in axes ? [c.tau_d_e for c in chunk] : SWEEP.defaults0.tau_d_e,
+                )
+            )
         end
         run_and_save!(model, chunk, seed, deltas, dgks, path; member...)
         nothing

@@ -20,6 +20,7 @@ const hierarchy_scores = Dict(
     "VISal" => 0.152, "VISpm" => 0.327, "VISam" => 0.441
 )
 const stim = "spontaneous"
+const PTHR = 1.0e-2   # matches WRExperiment.PTHR; the τ p-values are already BH-adjusted across depths
 
 # Layer integer codes in the saved data: 2 = L2/3, 3 = L4, 4 = L5, 5 = L6.
 const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
@@ -46,13 +47,6 @@ const SHOW_DTD_REGIONS = false
 
 # Shared origin of the direction arrows, in (a, b) data coordinates.
 const ARROW_ORIGIN = (0.55, -1.75)
-
-# Middle-row curve panels: the δ values at which the full input MAD and spectrum are drawn, decreasing from
-# the working point (δ_0 = 4), with τ_d_e held there. Each request is snapped to the nearest swept cell, and
-# the curves are pooled over neurons and over `CURVE_SEEDS` connectome seeds.
-const CURVE_DELTAS = [3.5, 3.25, 3.0]
-const CURVE_TAU_D = 5.0
-const CURVE_SEEDS = 1:10
 
 const outdir = plotsdir("hierarchical_variation")
 mkpath(outdir)
@@ -188,61 +182,6 @@ const τd_dir = mean_direction(
     _A_dtd_arrow, _B_dtd_arrow, τd_dtd_lookup, τd_arrow_range,
     δ_dtd_lookup, δ_arrow_range; dim = 2
 )
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Full input MAD / spectrum curves along the δ ladder
-#
-# The sweep writes one file per (plane cell, seed) into WRCircuit/data/circuit_sweep, each holding the
-# per-neuron input MAD (lag × Neuron) and PSD (frequency × Neuron) behind the a/b fits above. A file's key
-# SET is its plane, so the δ/τ_d files are those varying exactly {delta, tau_d_e, seed}; the δ × Δg_K and
-# δ × σ_ee planes live in the same directory and also carry a `delta` key.
-# ──────────────────────────────────────────────────────────────────────────────
-
-const sweepdir = projectdir("WRCircuit", "data", "circuit_sweep")
-
-const dtd_sweep_files = let wanted = Set(["delta", "tau_d_e", "seed"]),
-        out = Dict{NTuple{3, Float64}, String}()
-    for f in readdir(sweepdir; join = true)
-        p = try
-            parse_savename(f; connector = "&")[2]
-        catch
-            continue
-        end
-        Set(keys(p)) == wanted || continue
-        out[(p["delta"], p["tau_d_e"], Float64(p["seed"]))] = f
-    end
-    out
-end
-
-# Snap the requested curve parameters onto the swept grid.
-const _δ_sweep_grid = sort(unique(k[1] for k in keys(dtd_sweep_files)))
-const _τd_sweep_grid = sort(unique(k[2] for k in keys(dtd_sweep_files)))
-const δ_curves = [_δ_sweep_grid[_nearest(_δ_sweep_grid, v)] for v in CURVE_DELTAS]
-const τd_curve = _τd_sweep_grid[_nearest(_τd_sweep_grid, CURVE_TAU_D)]
-
-"""
-    pooled_curve(key, δ, τd)
-
-Median `inputs/mad` or `inputs/psd` curve at one sweep cell: median over neurons within each seed, then
-over `CURVE_SEEDS`. Returns `(x, y)` with the unit-stripped lookup (ms for MAD, ms⁻¹ for PSD) as `x`.
-"""
-function pooled_curve(key, δ, τd)
-    files = [
-        dtd_sweep_files[k] for k in ((δ, τd, Float64(s)) for s in CURVE_SEEDS)
-            if haskey(dtd_sweep_files, k)
-    ]
-    isempty(files) && error("No $key sweep files at δ = $δ, τ_d_e = $τd")
-    curves = map(files) do f
-        x = ustripall(jldopen(g -> g[key], f; typemap = toolsarray_typemap))
-        dropdims(median(x; dims = 2); dims = 2)
-    end
-    y = vec(median(reduce(hcat, map(collect, curves)); dims = 2))
-    return collect(lookup(first(curves), 1)), y
-end
-
-@info "Loading circuit curves at δ = $δ_curves, τ_d_e = $τd_curve ($(length(CURVE_SEEDS)) seeds each)"
-const mad_curves = [Base.invokelatest(pooled_curve, "inputs/mad", δ, τd_curve) for δ in δ_curves]
-const psd_curves = [Base.invokelatest(pooled_curve, "inputs/psd", δ, τd_curve) for δ in δ_curves]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # bFNS theory sweep — (α, β) → (a, b) direction arrows
@@ -437,13 +376,14 @@ function plot_hero!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1
 end
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Figure: (a, b) scatters on top, then one heatmap row per circuit plane below
+# Figure: (a, b) scatters on top, their hierarchy correlation across depth, then
+# the circuit forward map over the δ/τ_d plane
 # ──────────────────────────────────────────────────────────────────────────────
 
-f = SixPanel()   # (a, b) scatters (top), MAD/spectrum curves vs δ (middle), δ/τ_d heatmaps (bottom)
+f = SixPanel()
 
 # One sub-grid per panel; each holds [axis | colorbar] in its own columns. Row-major:
-# gs[1,2] = heroes (L2/3, L6); gs[3,4] = curves along the δ ladder; gs[5,6] = δ/τ_d plane (a, b).
+# gs[1,2] = heroes (L2/3, L6); gs[3,4] = hierarchy τ vs depth (a, b); gs[5,6] = δ/τ_d plane (a, b).
 gs = subdivide(f, 3, 2)
 
 begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
@@ -474,38 +414,42 @@ begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
     linkaxes!(ax_l23, ax_l6)
 end
 
-begin # * Middle row — the full input MAD (left) and spectrum (right) as δ decreases from the working point
-    # Colour by ASCENDING δ rank, not by the order CURVE_DELTAS happens to list, so the colorbar below reads
-    # low → high bottom-to-top however the config is written.
-    curve_rank = invperm(sortperm(δ_curves))
-    curve_colors = cgrad(pelagic, length(δ_curves); categorical = true)
-    curve_widths = [δ ≈ δ_0 ? 3 : 1.75 for δ in δ_curves]   # thicken the working-point curve, if sampled
-
-    ax_mad = Axis(
-        gs[3][1, 1]; xlabel = "Lag (ms)", ylabel = "MAD (arb. units)",
-        title = "Circuit:  input MAD", xscale = log10, yscale = log10
-    )
-    for (i, (t, y)) in enumerate(mad_curves)
-        lines!(ax_mad, t, y; color = curve_colors[curve_rank[i]], linewidth = curve_widths[i])
+begin # * Second row — how each exponent's hierarchy correlation varies with cortical depth
+    # The continuous version of the top row: rather than sampling two layers, `hierarchicalkendall`
+    # correlates each area's exponent against its hierarchy score at every common depth. Band is the
+    # BCa bootstrap CI; filled markers are significant after BH correction, open markers are not.
+    τ_panels = [("diffusion_hierarchical", "a", mesopelagic)]
+    if haskey(plot_data, "spectral_hierarchical")
+        push!(τ_panels, ("spectral_hierarchical", "b", ianthina))
+    else
+        @warn "No `spectral_hierarchical` in $inpath --- re-run collect_calculations.jl to fill gs[4]"
     end
 
-    ax_psd = Axis(
-        gs[4][1, 1]; xlabel = "Frequency (Hz)", ylabel = "PSD (arb. units)",
-        title = "Circuit:  input spectrum", xscale = log10, yscale = log10
-    )
-    for (i, (fr, y)) in enumerate(psd_curves)
-        lines!(ax_psd, 1.0e3 .* fr, y; color = curve_colors[curve_rank[i]], linewidth = curve_widths[i])  # 𝑓 is in ms⁻¹
-    end
+    for (i, (key, sym, color)) in enumerate(τ_panels)
+        d = plot_data[key][stim]
+        τ, 𝑝 = collect(d.μ), collect(d.𝑝)
+        depths = collect(d.unidepths)
+        σ = collect(d.σ)
+        sig = 𝑝 .< PTHR
 
-    # δ legend: one band per sampled value, ascending. Also keeps these axes the same pixel width as the
-    # colorbar-bearing panels above and below.
-    δ_sorted = sort(δ_curves)
-    for j in (3, 4)
-        Colorbar(
-            gs[j][1, 2]; colormap = curve_colors, limits = (0, length(δ_sorted)),
-            ticks = ((1:length(δ_sorted)) .- 0.5, string.(δ_sorted)),
-            label = "δ  (I:E ratio)", width = 12
+        ax = Axis(
+            gs[2 + i][1, 1]; xlabel = "Kendall's 𝜏", ylabel = "Cortical depth (%)",
+            ytickformat = xs -> string.(round.(Int, 100 .* xs)),
+            title = "Data:  $sym vs hierarchy", yreversed = true
         )
+        vlines!(ax, 0; color = :gray, linestyle = :dash, linewidth = 1)
+        band!(
+            ax, Point2f.(first.(σ), depths), Point2f.(last.(σ), depths);
+            color = (color, 0.25)
+        )
+        scatter!(ax, τ[sig], depths[sig]; color, markersize = 10)
+        scatter!(
+            ax, τ[.!sig], depths[.!sig]; color = :transparent,
+            strokecolor = color, strokewidth = 1, markersize = 10
+        )
+        # Invisible stand-in for the colorbar the other rows carry, so all four rows share a column width.
+        Box(gs[2 + i][1, 2]; visible = false, width = 12)
+        @info "$key: $(count(sig))/$(length(sig)) depths significant at p < $PTHR"
     end
 end
 
@@ -517,7 +461,7 @@ function circuit_heatmap!(pos, x, y, z; xlabel, ylabel, title, clabel, colorrang
     return ax
 end
 
-begin # * δ/τ_d plane heatmaps — the joint (δ × τ_d_e) plane, a (left) and b (right)
+begin # * Bottom row — δ/τ_d plane heatmaps, the joint (δ × τ_d_e) plane, a (left) and b (right)
     δlab = "δ  (I:E ratio)"
     τdlab = "τ_d_e  (E decay, ms)"
     ax_dtd_a = circuit_heatmap!(
