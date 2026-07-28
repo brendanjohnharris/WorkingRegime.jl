@@ -25,13 +25,15 @@ const PTHR = 1.0e-2   # matches WRExperiment.PTHR; the τ p-values are already B
 # Layer integer codes in the saved data: 2 = L2/3, 3 = L4, 4 = L5, 5 = L6.
 const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
 
-# δ/τ_d plane ROI: framed on the L2/3 hierarchy path plus the working point (δ_0 = 4, τd_0 = 5). The data a/b
-# now use the same MAPPLE estimator as the circuit (WRExperiment.diffusion_fit/mapple_fit), so no offset
-# correction is applied. Re-tune these bounds if the regenerated data lands elsewhere.
-const DELTA_MIN = 2.75
-const DELTA_MAX = 3.4
+# τ_d ROI: which τ_d_e values the bottom row draws. Framed on the L2/3 hierarchy path plus the
+# working point (δ_0 = 4, τd_0 = 5); re-tune if the regenerated data lands elsewhere.
 const TAU_D_MIN = 4.5
 const TAU_D_MAX = 5.5
+
+# How many τ_d_e curves to draw in the bottom row, evenly spaced across the τ_d ROI. The sweep has
+# ~17 τ_d_e values in that range, which bundles into an unreadable band; a handful shows the same
+# ordering and spread while staying legible.
+const N_TAU_LINES = 5
 
 # Span of the local window over which the circuit arrow directions are measured
 const DELTA_DELTA = 0.5
@@ -110,23 +112,20 @@ function seed_pooled_median(cells)
     end
     return out
 end
-# δ/τ_d plane (delta × tau_d_e): the joint E/I-ratio × excitatory-decay plane, sliced to the δ ROI
-# (critical region through the working point) × the τ_d ROI. Reads its own lookups (dtd_delta, dtd_tau_d_e).
+# δ/τ_d plane (delta × tau_d_e): the joint E/I-ratio × excitatory-decay plane. Reads its own
+# lookups (dtd_delta, dtd_tau_d_e). The bottom row plots the FULL swept δ range; only τ_d_e is
+# restricted, to the τ_d ROI, so there is no δ crop here any more.
 # The map calls are wrapped in `invokelatest` for Julia 1.12's stricter world-age rules on top-level globals.
 const _A_dtd_full = Base.invokelatest(seed_pooled_median, parent(circuit["a_dtd"]))
 const _B_dtd_full = Base.invokelatest(seed_pooled_median, parent(circuit["b_dtd"]))
 const δ_dtd_lookup = collect(circuit["dtd_delta"])
 const τd_dtd_lookup = collect(circuit["dtd_tau_d_e"])
-const δ_dtd_keep = findall(v -> DELTA_MIN <= v <= DELTA_MAX, δ_dtd_lookup)
 const τd_dtd_keep = findall(v -> TAU_D_MIN <= v <= TAU_D_MAX, τd_dtd_lookup)
-const δ_dtd = δ_dtd_lookup[δ_dtd_keep]
 const τd_dtd = τd_dtd_lookup[τd_dtd_keep]
 # Default working-regime point (δ_0, τd_0) --- Spatial model defaults snapped to the grid;
 # falls back to the known defaults if the sweep predates saving the anchor.
 const δ_0 = haskey(circuit, "delta_0") ? Float64(circuit["delta_0"]) : 4.0
 const τd_0 = haskey(circuit, "tau_d_e_0") ? Float64(circuit["tau_d_e_0"]) : 5.0
-const A_dtd = _A_dtd_full[δ_dtd_keep, τd_dtd_keep]   # (δ × τ_d)
-const B_dtd = _B_dtd_full[δ_dtd_keep, τd_dtd_keep]
 
 # Mean direction vectors of the circuit forward map in (a, b) on the δ/τ_d plane. Rather than
 # drawing full isolines, we summarise each knob's effect as a single net displacement
@@ -284,7 +283,6 @@ function compute_points(layer_idx)
 end
 
 const points_l23 = compute_points(2)   # L2/3
-const points_l6 = compute_points(5)    # L6
 
 # Categorical colour per region, ordered low → high hierarchy (`structures` is
 # already in ascending-score order). Scatter points and the colorbar draw from
@@ -292,6 +290,7 @@ const points_l6 = compute_points(5)    # L6
 const region_colors = cgrad(binarysunset, length(structures); categorical = true)
 const structure_color = Dict(s => region_colors[i] for (i, s) in enumerate(structures))
 const HEATMAP = sunrise
+const δlab = "δ  (I:E ratio)"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Hero-panel drawer. The circuit sweep curves and operating-point marker are
@@ -376,17 +375,18 @@ function plot_hero!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1
 end
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Figure: (a, b) scatters on top, their hierarchy correlation across depth, then
-# the circuit forward map over the δ/τ_d plane
+# Figure: the L2/3 (a, b) plane and the exponents' hierarchy correlation across
+# depth on top; the circuit's δ-dependence below
 # ──────────────────────────────────────────────────────────────────────────────
 
-f = SixPanel()
+f = FourPanel()
 
 # One sub-grid per panel; each holds [axis | colorbar] in its own columns. Row-major:
-# gs[1,2] = heroes (L2/3, L6); gs[3,4] = hierarchy τ vs depth (a, b); gs[5,6] = δ/τ_d plane (a, b).
-gs = subdivide(f, 3, 2)
+# gs[1] = L2/3 (a, b); gs[2] = hierarchy τ vs depth (a and b together);
+# gs[3,4] = circuit a, b against δ.
+gs = subdivide(f, 2, 2)
 
-begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
+begin # * Top left — (a, b) plane at L2/3
     scatterlimits = (
         (0.42, 0.65),   # a
         (-1.9, -1.5),    # b
@@ -402,122 +402,95 @@ begin # * Top row — (a, b) plane at L2/3 (left) and L6 (right)
         title = "$stim, $(layer_names[2])", limits = scatterlimits
     )
     plot_hero!(ax_l23, points_l23; axis_ranges = aranges)
-
-    ax_l6 = Axis(
-        gs[2][1, 1]; xlabel = "Diffusion exponent  a",
-        ylabel = "Spectral exponent  b",
-        title = "$stim, $(layer_names[5])", limits = scatterlimits
-    )
-    plot_hero!(ax_l6, points_l6; axis_ranges = aranges)
-
-    # Share axis limits so the L2/3 ↔ L6 comparison is visually fair.
-    linkaxes!(ax_l23, ax_l6)
 end
 
-begin # * Second row — how each exponent's hierarchy correlation varies with cortical depth
-    # The continuous version of the top row: rather than sampling two layers, `hierarchicalkendall`
+begin # * Top right — hierarchy correlation of each exponent across cortical depth
+    # The continuous version of the scatter: rather than sampling one layer, `hierarchicalkendall`
     # correlates each area's exponent against its hierarchy score at every common depth. Band is the
     # BCa bootstrap CI; filled markers are significant after BH correction, open markers are not.
+    # `a` and `b` share one axis (both are Kendall's τ on the same scale) so the row stays 2-wide.
     τ_panels = [("diffusion_hierarchical", "a", mesopelagic)]
     if haskey(plot_data, "spectral_hierarchical")
         push!(τ_panels, ("spectral_hierarchical", "b", ianthina))
     else
-        @warn "No `spectral_hierarchical` in $inpath --- re-run collect_calculations.jl to fill gs[4]"
+        @warn "No `spectral_hierarchical` in $inpath --- re-run collect_calculations.jl for the b series"
     end
 
-    for (i, (key, sym, color)) in enumerate(τ_panels)
+    ax_τ = Axis(
+        gs[2][1, 1]; xlabel = "Kendall's 𝜏", ylabel = "Cortical depth (%)",
+        ytickformat = xs -> string.(round.(Int, 100 .* xs)),
+        title = "Hierarchy correlation", yreversed = true
+    )
+    vlines!(ax_τ, 0; color = :gray, linestyle = :dash, linewidth = 1)
+    for (key, sym, color) in τ_panels
         d = plot_data[key][stim]
         τ, 𝑝 = collect(d.μ), collect(d.𝑝)
         depths = collect(d.unidepths)
         σ = collect(d.σ)
         sig = 𝑝 .< PTHR
 
-        ax = Axis(
-            gs[2 + i][1, 1]; xlabel = "Kendall's 𝜏", ylabel = "Cortical depth (%)",
-            ytickformat = xs -> string.(round.(Int, 100 .* xs)),
-            title = "Data:  $sym vs hierarchy", yreversed = true
-        )
-        vlines!(ax, 0; color = :gray, linestyle = :dash, linewidth = 1)
         band!(
-            ax, Point2f.(first.(σ), depths), Point2f.(last.(σ), depths);
+            ax_τ, Point2f.(first.(σ), depths), Point2f.(last.(σ), depths);
             color = (color, 0.25)
         )
-        scatter!(ax, τ[sig], depths[sig]; color, markersize = 10)
+        scatter!(ax_τ, τ[sig], depths[sig]; color, markersize = 10, label = sym)
         scatter!(
-            ax, τ[.!sig], depths[.!sig]; color = :transparent,
+            ax_τ, τ[.!sig], depths[.!sig]; color = :transparent,
             strokecolor = color, strokewidth = 1, markersize = 10
         )
-        # Invisible stand-in for the colorbar the other rows carry, so all four rows share a column width.
-        Box(gs[2 + i][1, 2]; visible = false, width = 12)
         @info "$key: $(count(sig))/$(length(sig)) depths significant at p < $PTHR"
     end
+    axislegend(ax_τ; position = :rb, framevisible = false, merge = true)
+    # Invisible stand-in for the colorbar the other panels carry, so columns share a width.
+    Box(gs[2][1, 2]; visible = false, width = 12)
 end
 
-"Draw one circuit forward-map heatmap (axis + colorbar) into sub-grid `pos`."
-function circuit_heatmap!(pos, x, y, z; xlabel, ylabel, title, clabel, colorrange = CairoMakie.Makie.automatic, highclip = CairoMakie.Makie.automatic, lowclip = CairoMakie.Makie.automatic)
-    ax = Axis(pos[1, 1]; xlabel = xlabel, ylabel = ylabel, title = title)
-    p = heatmap!(ax, x, y, z; colormap = HEATMAP, colorrange, highclip, lowclip)
-    Colorbar(pos[1, 2], p; label = clabel, width = 12)
+"""
+    circuit_lines!(pos, grid; ylabel, title)
+
+`N_TAU_LINES` lines, evenly spaced across the τ_d_e ROI, plotted against δ over the full swept
+range. Replaces the earlier heatmap: lines show the δ-dependence
+and the spread across τ_d_e more directly than a colour scale, and they make the saturation at
+high δ legible. The colorbar is categorical and ticked with the τ_d_e values actually drawn, so
+it is a legend for the lines rather than a continuous scale over values that are not shown.
+"""
+function circuit_lines!(pos, grid; ylabel, title, nlines = N_TAU_LINES)
+    ax = Axis(pos[1, 1]; xlabel = δlab, ylabel = ylabel, title = title)
+    n = min(nlines, length(τd_dtd_keep))
+    sel = unique(τd_dtd_keep[round.(Int, range(1, length(τd_dtd_keep); length = n))])
+    cols = cgrad(HEATMAP, max(2, length(sel)); categorical = true)
+    for (i, j) in enumerate(sel)
+        v = grid[:, j]
+        k = findall(!isnan, v)
+        isempty(k) && continue
+        lines!(ax, δ_dtd_lookup[k], v[k]; color = cols[i], linewidth = 2.5)
+    end
+    Colorbar(
+        pos[1, 2]; colormap = cols, limits = (0, length(sel)),
+        ticks = ((1:length(sel)) .- 0.5, string.(round.(τd_dtd_lookup[sel]; digits = 2))),
+        label = "τ_d_e (ms)", width = 12
+    )
     return ax
 end
 
-begin # * Bottom row — δ/τ_d plane heatmaps, the joint (δ × τ_d_e) plane, a (left) and b (right)
-    δlab = "δ  (I:E ratio)"
-    τdlab = "τ_d_e  (E decay, ms)"
-    ax_dtd_a = circuit_heatmap!(
-        gs[5], δ_dtd, τd_dtd, A_dtd;
-        xlabel = δlab, ylabel = τdlab, title = "Circuit:  a", clabel = "a"
+begin # * Bottom row — circuit exponents against δ, one line per τ_d_e
+    ax_dtd_a = circuit_lines!(
+        gs[3], _A_dtd_full; ylabel = "Diffusion exponent  a", title = "Circuit:  a vs δ"
     )
-    ax_dtd_b = circuit_heatmap!(
-        gs[6], δ_dtd, τd_dtd, B_dtd;
-        xlabel = δlab, ylabel = τdlab, title = "Circuit:  b", clabel = "b"
+    ax_dtd_b = circuit_lines!(
+        gs[4], _B_dtd_full; ylabel = "Spectral exponent  b", title = "Circuit:  b vs δ"
     )
-    # Overlay the L2/3 hierarchy path: each area mapped to the (δ, τ_d) cell whose circuit (a, b) is closest
-    # to its measured (a, b) (data now uses the same MAPPLE estimator as the circuit), distance normalised
-    # by the data spans. Areas are joined in hierarchy order (low -> high); fill = area colour.
-    SHOW_DTD_REGIONS && let aspan = scatterlimits[1][2] - scatterlimits[1][1], bspan = scatterlimits[2][2] - scatterlimits[2][1]
-        closest_dt = function (a_d, b_d)
-            best = (1, 1); bd = Inf
-            for i in δ_dtd_keep, j in τd_dtd_keep # restrict to DELTA/TAU_D min-max ranges
-                ac = _A_dtd_full[i, j]; bc = _B_dtd_full[i, j]
-                (isnan(ac) || isnan(bc)) && continue
-                dd = ((ac - a_d) / aspan)^2 + ((bc - b_d) / bspan)^2
-                dd < bd && (bd = dd; best = (i, j))
-            end
-            return (δ_dtd_lookup[best[1]], τd_dtd_lookup[best[2]])
-        end
-        mapped = [closest_dt(p.a, p.b) for p in points_l23]
-        δpath = first.(mapped); τpath = last.(mapped)
-        cols = [structure_color[p.structure] for p in points_l23]
-        for ax in (ax_dtd_a, ax_dtd_b)
-            lines!(ax, δpath, τpath; color = (:black, 0.55), linewidth = 2)
-            scatter!(
-                ax, δpath, τpath; color = cols, marker = :circle,
-                markersize = 15, strokecolor = :black, strokewidth = 1
-            )
-        end
-    end
-    # Default working point (δ_0, τd_0) --- the circuit's nominal operating regime, for reference.
-    # for ax in (ax_dtd_a, ax_dtd_b)
-    #     scatter!(
-    #         ax, [δ_0], [τd_0]; color = :white, marker = :star5,
-    #         markersize = 22, strokecolor = :black, strokewidth = 1.5
-    #     )
-    # end
 end
 
-# A matching categorical colorbar on each top panel keeps the two axes the same
-# pixel width (fair L2/3 ↔ L6 comparison) and doubles as the region legend: one
-# band per structure, ordered low → high hierarchy, with "Higher"/"Lower" ends.
+# The categorical colorbar on the scatter panel doubles as the region legend: one band per
+# structure, ordered low → high hierarchy, with "Higher"/"Lower" ends.
 const _nreg = length(structures)
-for j in (1, 2)
-    Colorbar(
-        gs[j][1, 2]; colormap = region_colors, limits = (0, _nreg),
-        ticks = ((1:_nreg) .- 0.5, structures), width = 12
-    )
-    Label(gs[j][1, 2, Top()], "Higher"; fontsize = 12, padding = (0, 0, -6, 0))
-    Label(gs[j][1, 2, Bottom()], "Lower"; fontsize = 12, padding = (0, 0, 0, 4))
-end
+Colorbar(
+    gs[1][1, 2]; colormap = region_colors, limits = (0, _nreg),
+    ticks = ((1:_nreg) .- 0.5, structures), width = 12
+)
+Label(gs[1][1, 2, Top()], "Higher"; fontsize = 12, padding = (0, 0, -6, 0))
+Label(gs[1][1, 2, Bottom()], "Lower"; fontsize = 12, padding = (0, 0, 0, 4))
 
 addlabels!(f)
 display(f)
