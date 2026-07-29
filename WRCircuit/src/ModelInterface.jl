@@ -178,12 +178,16 @@ and host memory stops scaling with `nsteps`:
 `transient` (recorded steps) is dropped by the reductions. The full spike raster is kept only with
 `record_spikes = true` (default: only in the no-reduction fallback). `scatter` is forwarded to `solve`
 (`:auto`, or `:compacted` for sparse firing over a large connectome).
+
+`record` is a NamedTuple of extra Dewdrop monitor specs merged into the recording, for quantities the
+reductions above do not cover --- e.g. a patch LFP, `Aggregate(Trace(:V; of = patch), :mean)`, whose
+`bs.record.<name>.data` is `(B, nsteps)`. A non-empty `record` also suppresses the raw-trace fallback.
 """
 function simulate_batch(
         model::SpatialModel, time, deltas::AbstractVector{<:Real}, dgks::AbstractVector{<:Real};
         dt = 0.1, progress = :auto, arch::Dewdrop.AbstractArchitecture = DEWDROP_BACKEND(),
         mad_lags = nothing, psd_fmin = nothing, fano_taus = nothing, rate = false,
-        transient = 0, scatter = :auto, record_spikes = nothing,
+        transient = 0, scatter = :auto, record_spikes = nothing, record = (;),
         tau_r_e = nothing, tau_d_e = nothing, kwargs...
     )
     B = length(deltas)
@@ -238,13 +242,14 @@ function simulate_batch(
     # If none are requested, fall back to the raw E `itot` trace. The full spike raster is recorded only when
     # `record_spikes = true` (default `nothing` → only in the raw fallback, since the reductions replace it).
     # `scatter` is forwarded to `solve` (`:auto` picks edge/compacted; pass `:compacted` for sparse firing).
-    reduced = !(mad_lags === nothing && psd_fmin === nothing && fano_taus === nothing) || rate
+    reduced = !(mad_lags === nothing && psd_fmin === nothing && fano_taus === nothing) || rate || !isempty(record)
     rec = reduced ? (;) : (; input = Trace(:itot; of = of))
     mad_lags === nothing || (rec = merge(rec, (; mad = MADev(:itot; of = of, lags = mad_lags, transient = tr))))
     psd_fmin === nothing || (rec = merge(rec, (; psd = Welch(:itot; of = of, f_min = psd_fmin, transient = tr))))
     fano_taus === nothing || (rec = merge(rec, (; fano = Fano(; of = of, taus = fano_taus, transient = tr))))
     rate && (rec = merge(rec, (; rate = SpikeRate(; of = of, transient = tr))))
     (record_spikes === nothing ? !reduced : record_spikes) && (rec = merge(rec, (; spike = Spikes(of = of))))
+    rec = merge(rec, record)    # caller-supplied monitors, e.g. a patch LFP via `Aggregate(Trace(:V; of = patch), :mean)`
     return solve(
         net, FixedStep(dt); batch = B, v0 = (-70.0, -50.0),
         model_overrides = (; ΔgK = ΔgK), syn_overrides = syn_over,
