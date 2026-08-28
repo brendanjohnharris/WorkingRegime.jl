@@ -11,8 +11,8 @@ using LinearAlgebra
 using Optim
 using ForwardDiff # activates TimeseriesTools OptimExt (MAPPLE fit!)
 using MoreMaps
-using StatsBase: Histogram, merge!   # `fit` comes in via @preamble (shared StatsAPI.fit generic)
-using Logging, TerminalLoggers       # for the scoped progress-bar logger (with_logger) in the simulate block
+using StatsBase: Histogram, merge!
+using Logging, TerminalLoggers
 WRCircuit.@preamble
 set_theme!(fathom(:physics))
 outfile = datadir("demo_run.jld2")
@@ -38,7 +38,7 @@ begin
 end
 
 begin
-    tmax = 25u"s" #55u"s"
+    tmax = 55u"s"
     tmin = 5u"s" # The transient. Simulations always begin at 0
     fixed_params = (;
         rho,
@@ -91,13 +91,16 @@ function fit_spectrum(s; components, peaks, f_range)
     fitted_s = predict(m, s)
     return (; m, s = original_s, fitted_s, _s)
 end
+# `w = true` weights by log spacing, matching `WRCircuit.diffusion_exponents`: the MAD lag grid is
+# rounded to whole samples, so short lags land on consecutive integers (linearly spaced) while long
+# lags stay log-spaced, and an unweighted fit is dominated by the log-denser upper end of the band.
 function fit_mad(s; components, peaks, tau_range)
     negdims = [i for i in 1:ndims(s) if i != dimnum(s, 𝑡)] |> Tuple
     s = s[𝑡 = tau_range] |> ustripall
     s = median(s, dims = negdims)
     s = dropdims(s, dims = negdims)
     m = fit(MAPPLE, s; components, peaks)
-    fit!(m, s)
+    fit!(m, s; w = true)
     fitted_s = predict(m, s)
     return (; m, s, fitted_s)
 end
@@ -119,7 +122,7 @@ end
 function fit_mads(s::AbstractVector; components, peaks, tau_range)
     s = s[𝑡 = tau_range] |> ustripall
     m = fit(MAPPLE, s; components, peaks)
-    fit!(m, s)
+    fit!(m, s; w = true)
     fitted_s = predict(m, s)
     return (; m, s, fitted_s)
 end
@@ -150,10 +153,20 @@ begin # * Fano factor
     τs = logrange(dt * 10 |> ustrip, dt * 10000 |> ustrip, length = 200) # ms
     fano = fano_factor(ustripall(spikes), τs)
 
+    # The MIDDLE component, not the steepest one. A Fano curve is flat (β ≈ 0) out to ~13 ms, rises
+    # through a scaling regime, then flattens off past ~60 ms; `sort!` orders components by
+    # breakpoint, so the middle one IS that scaling regime. `maximum(β)` instead takes whichever
+    # segment happens to be steepest, which is a sub-piece of the rise whenever the fit splits it in
+    # two --- across two runs of this same seeded configuration it swung 0.24 → 0.76, against
+    # 0.15 → 0.35 for the middle component and 0.15 → 0.31 for a fixed 15-60 ms band. (That residual
+    # 2x is the circuit's own run-to-run spread, not the estimator: this exponent needs a seed
+    # ensemble before it can be quoted.)
     mfano = map(Chart(ProgressLogger(), Threaded()), eachcol(fano)) do x
         ma = fit(MAPPLE, x; components = 3, peaks = 0)
         fit!(ma, x)
-        return ma.params.components.β |> maximum
+        sort!(ma)                                  # order components by breakpoint
+        β = ma.params.components.β
+        return β[(length(β) + 1) ÷ 2]
     end
 end
 
@@ -202,7 +215,9 @@ end
 
 begin # * Fits
     f_range = 10u"Hz" .. 1000u"Hz"
-    tau_range = 0u"s" .. 1u"s"
+    # The diffusion-exponent band, read from the package so the two cannot drift apart. `MAD_BAND_MS`
+    # is in ms while these MAD curves carry their lags in seconds, hence the /1000.
+    tau_range = (WRCircuit.MAD_BAND_MS[1] / 1000)u"s" .. (WRCircuit.MAD_BAND_MS[2] / 1000)u"s"
     @info "Fitting spectra"
     spectrum_fit = map(Chart(Threaded(), ProgressLogger()), spectra) do s
         fit_spectrum(s; components = 1, peaks = 1, f_range)
@@ -210,12 +225,17 @@ begin # * Fits
     spectrum_fits = map(Chart(Threaded(), ProgressLogger()), spectra) do s
         fit_spectrums(s; components = 1, peaks = 1, f_range)
     end
+    # ONE power-law component over `tau_range`, matching `WRCircuit.diffusion_exponents` and
+    # `WRExperiment.diffusion_fit`. The previous 2-component fit over the whole 0-1 s curve returned
+    # `first(β)` as the τ→0 asymptote of a segment blended with its neighbour --- not a slope the
+    # curve exhibits anywhere (0.725 against 0.631 on these very MADs), and it was that 0.725 which
+    # reached combined_curves.jl while every other figure used the 1-component form.
     @info "Fitting MADs"
     mad_fit = map(Chart(Threaded(), ProgressLogger()), mads) do m
-        fit_mad(m; components = 2, peaks = 0, tau_range)
+        fit_mad(m; components = 1, peaks = 0, tau_range)
     end
     mad_fits = map(Chart(Threaded(), ProgressLogger()), mads) do m
-        fit_mads(m; components = 2, peaks = 0, tau_range)
+        fit_mads(m; components = 1, peaks = 0, tau_range)
     end
 end
 

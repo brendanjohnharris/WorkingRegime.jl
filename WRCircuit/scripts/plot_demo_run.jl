@@ -43,7 +43,7 @@ begin  # * Spike raster (E + I)
         sts = times(s)[findall(s)]
     end
 
-    radius = 0.15 # mm
+    radius = 0.1 # mm; the project-wide patch radius, matching the spatial sweeps and Fig 1
     origin = [dx / 2, dx / 2]
     emask = map(epositions) do pos
         dp = abs.(pos .- origin)

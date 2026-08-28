@@ -15,7 +15,13 @@ import Bootstrap
 import MultipleTesting: adjust, BenjaminiHochberg
 import HypothesisTests: MannWhitneyUTest, SignedRankTest, pvalue
 
-const PSD_RANGE = [3, 1000]
+# Band over which the spectral exponent is fit, IN HERTZ. The upper edge is the acquisition
+# anti-aliasing corner, NOT the Nyquist frequency: the Allen LFP is stored at 1250 Hz (Nyquist
+# 625 Hz), but the LFP band is filtered at ~500 Hz before storage, so 505-625 Hz is filter rolloff
+# falling to a flat noise floor (VISp spontaneous median: local slope -14 over 500-625 Hz, PSD down
+# 20x by 550 Hz and flat thereafter). Fitting through it steepens the aperiodic slope by ~0.16
+# (median curve: b = -1.49 over 3-500 Hz vs -1.65 over 3-625 Hz), so the cliff is excluded.
+const PSD_RANGE = [3, 500]
 
 # Band over which the diffusion exponent is fit, IN SECONDS (the LFP lag axis is in seconds; the
 # circuit's `WRCircuit.MAD_BAND_MS` is in milliseconds, so the numeric values differ by 1000x even
@@ -100,11 +106,24 @@ three decades carry no exponent; `band` keeps the fit inside the scaling regime.
 consecutive integers (linearly spaced) while long lags stay log-spaced, so an unweighted fit would
 be dominated by the log-denser upper end of the band. Requires TimeseriesTools with `logweights`.
 """
-function diffusion_fit(mad_col; band = MAD_BAND)
+diffusion_fit(mad_col; band = MAD_BAND) = last(diffusion_line(mad_col; band))
+
+"""
+    diffusion_line(mad_col; band = MAD_BAND) -> (intercept, slope)
+
+The same fit as [`diffusion_fit`](@ref), returned as the log-log LINE it is:
+`log10(MAD) = intercept + slope·log10(τ)`. A 1-component, 0-peak MAPPLE is a single power law, so the
+line IS the model rather than an approximation to it, and `slope` is exactly `diffusion_fit`'s
+exponent. Use this wherever the fit is drawn, so the line on the figure and the exponent in the
+caption cannot come from different estimators.
+"""
+function diffusion_line(mad_col; band = MAD_BAND)
     y = ustripall(mad_col)[𝑡 = band[1] .. band[2]]
     m = fit(MAPPLE, y; components = 1, peaks = 0)
     fit!(m, y; w = true)
-    return first(m.params.components.β)
+    β = first(m.params.components.β)
+    τ₀ = first(lookup(y, 𝑡))                       # any band lag pins the intercept; the model is a line
+    return log10(only(predict(m, [τ₀]))) - β * log10(τ₀), β
 end
 
 """
@@ -191,6 +210,16 @@ function madev(x::MultivariateRegular, _lags; kwargs...)
     m = mapslices(x -> madev(x, lags; kwargs...), parent(x); dims = 1)
     return Timeseries(m, _lags, d...)
 end
+
+"""
+    madev_taus(dt)
+
+The pipeline's MAD lag grid: 50 log-spaced lags over 1 ms--1 s, reduced to DISTINCT whole-sample
+lags at `dt` (in seconds). `madev` labels each point with the requested τ, so a grid finer than the
+sample period would return tied values at a moving x; distinct integer lags make every point an
+independent measurement at its true lag.
+"""
+madev_taus(dt) = filter(>=(1), unique(round.(Int, exp10.(range(-3, 0, 50)) ./ dt))) .* dt
 
 function _count(spike_times, τ; bins = minimum(spike_times):τ:maximum(spike_times))
     return fit(Histogram, spike_times, bins).weights
@@ -317,14 +346,9 @@ function send_madev(
             # end
         end
 
-        # `madev` rounds each requested lag to a whole number of samples but labels the result with the
-        # REQUESTED τ, so a log grid finer than the sample period returns tied values at a moving x (at
-        # 1250 Hz the 1-3 ms points collapse onto lags 1, 2, 3). Build the grid from DISTINCT integer
-        # lags instead, as WRCircuit does, so every point is an independent measurement at its true lag.
         lfp = LFP |> ustripall            # dt from the same object madev sees, so the two agree by construction
         dt = TimeseriesTools.samplingperiod(lfp)
-        taus = unique(round.(Int, exp10.(range(-3, 0, 50)) ./ dt))
-        taus = filter(>=(1), taus) .* dt
+        taus = madev_taus(dt)             # distinct whole-sample lags; see the docstring
         mad = madev(lfp, taus)
         depths = AN.getchanneldepths(session, LFP; method = :probe)
         mad = set(mad, Chan => Depth(depths))
@@ -588,7 +612,8 @@ function calcquality(
         dirname;
         suffix = "jld2",
         connector = connector,
-        require = true
+        require = true,
+        requirekeys = nothing # completeness keys for non-madev outputs (e.g. surrogates)
     )
     if isempty(readdir(dirname))
         return []
@@ -615,8 +640,9 @@ function calcquality(
                     if require
                         canload = jldopen(f, "r"; iotype = IOStream) do fl
                             # fl["performance_metrics"] # Can load
-                            return has_calc_keys(fl) &&
-                                has_keys(fl, string.(_require))
+                            complete = isnothing(requirekeys) ? has_calc_keys(fl) :
+                                has_calc_keys(fl, requirekeys)
+                            return complete && has_keys(fl, string.(_require))
                         end
                     else
                         canload = true
@@ -640,6 +666,7 @@ function calcquality(
             end
         end
     end
+    isempty(ps) && return [] # no complete files yet: same as an empty directory
     ks = keys.(ps) |> collect
     vs = values.(ps) .|> collect
     vs = stack(vs)
@@ -680,20 +707,22 @@ function calcquality(
     return Q
 end
 
-function has_calc_keys(D)
-    required_keys = [
-        "S",
-        "mad",
-        "coeff",
-        "coeffs",
-        "knees",
-        "chi",
-        "unitdepths",
-        # "plotfiles",
-    ]
+function has_calc_keys(
+        D,
+        required_keys = [
+            "S",
+            "mad",
+            "coeff",
+            "coeffs",
+            "knees",
+            "chi",
+            "unitdepths",
+            # "plotfiles",
+        ]
+    )
     return (haskey(D, "error") && contains(D["error"], "Region error")) ||
         (
-        has_keys(D, required_keys) #&& all(isfile.(projectdir.(D["plotfiles"])))
+        has_keys(D, string.(required_keys)) #&& all(isfile.(projectdir.(D["plotfiles"])))
     )
 end
 

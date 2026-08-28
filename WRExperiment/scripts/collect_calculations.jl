@@ -28,6 +28,106 @@ using Unitful
 import AllenNeuropixelsBase as AN
 import AllenNeuropixelsBase: Depth
 import TimeseriesTools: freqs
+import TimeseriesSurrogates: RandomFourier, surrogenerator
+using Clustering
+using LinearAlgebra
+
+# * Figure 1 inputs. Both blocks below were folded in from standalone scripts (`scripts/plots/traces.jl`
+# and the increment-histogram script) so that every Figure 1 input is produced here and read from disk
+# by `scripts/plots/Fig1_combined_curves.jl`. Each is cached independently, so re-running this script
+# does not repeat their LFP loads.
+
+begin # * Example LFP trace + spike raster (Fig 1b)
+    traces_data, _ = produce_or_load(
+        Dict(), DrWatson.datadir(); filename = savepath("traces")
+    ) do _
+        sessionid = DEFAULT_SESSION_ID
+        structure = "VISp"
+        stimulus = "spontaneous"
+        chan = 8
+        session = AN.Session(sessionid)
+        LFP = AN.formatlfp(session; rectify = false, epoch = :longest, structure, stimulus)
+        spikes = AN.getspiketimes(session, structure)
+
+        t0lfp = minimum(times(LFP))
+        window = (t0lfp + 139) .. (t0lfp + 140)       # a 1 s window well inside the epoch
+        y = map(collect(values(spikes))) do s
+            s[findall(s .∈ [window])]
+        end
+        y = filter(x -> length(x) > 5, y)             # only neurons with enough spikes to order
+        # Order neurons by spike-train similarity so the raster shows its correlation structure rather
+        # than an arbitrary unit ordering. `stoic` returns the similarity matrix; invert for a distance.
+        h = hclust(Symmetric(1.0 ./ TimeseriesTools.stoic(y)))
+        y = y[h.order]
+
+        x = LFP[𝑡 = window][:, chan] |> ustripall
+        t0 = minimum(times(x))
+        Dict(
+            "t" => collect(times(x)) .- t0,
+            "lfp" => collect(x),
+            "spikes" => [collect(s) .- t0 for s in y],
+            "sessionid" => sessionid, "structure" => structure,
+            "stimulus" => stimulus, "channel" => chan
+        )
+    end
+end
+
+begin # * Pooled L2/3 increment distribution against its FT surrogate null (Fig 1, far right)
+    # Each channel's increments are standardised by their own standard deviation before pooling, so
+    # channels and sessions of different amplitude contribute on equal terms and the pooled curve is
+    # directly comparable to a standard Gaussian. One FT surrogate per channel is histogrammed
+    # alongside: phase randomisation leaves Gaussian increments, so the surrogate curve gives the null
+    # empirically as well as analytically. Serial --- Allen access goes through PythonCall.
+    increment_histograms, _ = produce_or_load(
+        Dict(), DrWatson.datadir(); filename = savepath("increment_histograms")
+    ) do _
+        n_sessions = 12                                # enough for a smooth density to ~1e-6
+        structure, stimulus = "VISp", "spontaneous"
+        edges = range(-15, 15, length = 601)           # standard deviations, 0.05 SD bins
+        sessions = load(
+            DrWatson.datadir("session_table.jld2"), "session_table"
+        ).ecephys_session_id[1:n_sessions]
+
+        counts, counts_surr = zeros(Int, length(edges) - 1), zeros(Int, length(edges) - 1)
+        kurt, kurt_surr, nchan = Float64[], Float64[], 0
+        for (i, sessionid) in enumerate(sessions)
+            @info "[$i/$(length(sessions))] increment histogram, session $sessionid"
+            try
+                session = AN.Session(sessionid)
+                LFP = AN.formatlfp(
+                    session; tol = 3, sessionid, epoch = :longest, band = (1.0e-3, 1.0e-2),
+                    pass = (1, 625), stimulus, structure
+                )
+                X = Float64.(parent(ustripall(LFP)))
+                lnum = parselayernum.(
+                    string.(last(AN.getchannellayers(session, collect(lookup(LFP, AN.Chan)))))
+                )
+                for j in findall(lnum .== 2)           # L2/3
+                    d = diff(@view X[:, j])
+                    s = diff(surrogenerator(collect(@view X[:, j]), RandomFourier(), Xoshiro(j))())
+                    counts .+= StatsBase.fit(Histogram, d ./ std(d), edges).weights
+                    counts_surr .+= StatsBase.fit(Histogram, s ./ std(s), edges).weights
+                    push!(kurt, kurtosis(d))           # excess kurtosis, as the surrogate sweep computes it
+                    push!(kurt_surr, kurtosis(s))
+                    nchan += 1
+                end
+            catch e
+                @warn "Skipping $sessionid" e
+            end
+        end
+        density(c) = c ./ (sum(c) * step(edges))
+        Dict(
+            "edges" => collect(edges),
+            "centres" => collect(edges)[1:(end - 1)] .+ step(edges) / 2,
+            "density" => density(counts), "density_surrogate" => density(counts_surr),
+            "counts" => counts, "counts_surrogate" => counts_surr,
+            "kurtosis" => kurt, "kurtosis_surrogate" => kurt_surr,
+            "nchannels" => nchan, "sessions" => sessions,
+            "structure" => structure, "stimulus" => stimulus
+        )
+    end
+end
+
 
 # * Collect plot data
 begin
@@ -399,7 +499,14 @@ begin
                             m = X \ fano_range
                             return last(m)
                         end
-                        return ToolsArray(slopes, (Unit(units.ecephys_unit_id),)) |> stack
+                        # Drop the units with no fano curve BEFORE reducing over Unit. Without this the
+                        # `mean` below propagates a single unit's NaN over the whole session: 11% of units
+                        # carry the NaN sentinel, which NaN-ed 77% of the (session, layer) cells even though
+                        # no cell has every unit missing. Mirrors the `isa AbstractVector` guard the
+                        # fano_curves block already applies for the same reason.
+                        keep = findall(!isnan, slopes)
+                        isempty(keep) && return nothing
+                        return ToolsArray(slopes[keep], (Unit(units.ecephys_unit_id[keep]),)) |> stack
                     end
                 end
                 idxs = findall(!isnothing, _c)
@@ -463,14 +570,20 @@ begin
             m = dropdims(m, dims = :layer)
         end
 
-        # Fit exponent in 1ms-10ms range
-        _m = m[𝑡 = 1.0e-3 .. 1.0e-2]
-        t = log10.(times(_m))
-        s = log10.(parent(_m))
-        coeff = hcat(ones(length(t)), t) \ s
-        intercept, slope = eachrow(coeff)
-        meanintercept = median(intercept)
-        meanslope = median(slope)
+
+        _m = m[𝑡 = WRExperiment.MAD_BAND[1] .. WRExperiment.MAD_BAND[2]]      # kept only for `fit_t`, the drawn line's x-axis
+        fits = map(eachslice(m, dims = SessionID)) do col
+            try
+                diffusion_line(col)
+            catch err
+                @warn "diffusion_line failed for one session; dropping it" err
+                (NaN, NaN)
+            end
+        end
+        intercept = collect(first.(fits))
+        slope = collect(last.(fits))
+        meanintercept = median(filter(!isnan, intercept))
+        meanslope = median(filter(!isnan, slope))
 
         # Median + IQR
         mu = median(m, dims = SessionID)

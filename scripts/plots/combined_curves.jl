@@ -99,7 +99,7 @@ for stim_str in stimuli_str
         )
 
         text!(
-            ax, 1.0e-2, 10^0.6;
+            ax, 1.0e-2, 10^0.7;
             text = "a = $(round(mad.meanslope, sigdigits = 2))",
             color = experiment_color, align = (:left, :top)
         )
@@ -143,9 +143,16 @@ for stim_str in stimuli_str
         #     align=(:center, :bottom), color=:black, rotation=0,
         #     fontsize=16, offset=(0, 5))
 
-        # MAPPLE fit line
+        # The APERIODIC (1/f) component of the MAPPLE fit, not the full fit. Both fits here use ONE
+        # power-law component, so the background is exactly a straight line in log-log whose slope is
+        # the spectral exponent --- drawing it directly shows the quantity the panel quotes, without
+        # the Gaussian bumps the exponent is defined to exclude. Only the slope carries information:
+        # the offset comes from the same min-max normalisation as every other curve in this panel,
+        # and drawing it this way makes the line and the annotated `b` the same number by
+        # construction (the full fit was a fit to the median curve, while `b` is the median of the
+        # per-session fits, so the two used to disagree slightly).
         lines!(
-            ax, psd.f, exp10.(normalize(log10.(psd.mapple)));
+            ax, psd.f, 1.25 .* exp10.(normalize(log10.(psd.f .^ psd.spectral_exponent_median)));
             color = experiment_color,
             linestyle = :dash
         )
@@ -157,12 +164,13 @@ for stim_str in stimuli_str
             color = circuit_color
         )
         lines!(
-            ax, circuit.psd.fit_f, 1.25 .* exp10.(normalize(log10.(circuit.psd.fit_vals)));
+            ax, circuit.psd.fit_f,
+            1.25 .* exp10.(normalize(log10.(circuit.psd.fit_f .^ circuit.psd.exponent)));
             color = circuit_color, linestyle = :dash
         )
 
         text!(
-            ax, 7, 10^0.3;
+            ax, 7, 10^0.4;
             text = "b = $(round(psd.spectral_exponent_median; sigdigits = 3))",
             color = experiment_color, align = (:left, :top)
         )
@@ -220,8 +228,9 @@ for stim_str in stimuli_str
     # addlabels!(f)
 
     display(f)
-    outfile = joinpath(outdir, "combined_curves_$(stim_str).pdf")
+    outfile = joinpath(outdir, "combined_curves_$(stim_str).svg")
     wsave(outfile, f)
+    wsave(Base.replace(outfile, ".svg" => ".png"), f)
     @info "Saved $outfile"
 
     # Summary statistics (matching per-metric reference scripts)

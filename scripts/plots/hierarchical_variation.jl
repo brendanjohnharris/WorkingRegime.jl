@@ -11,6 +11,7 @@ using CairoMakie
 using Fathom
 using Statistics
 using Random
+using DelimitedFiles
 
 set_theme!(fathom())
 
@@ -25,27 +26,20 @@ const PTHR = 1.0e-2   # matches WRExperiment.PTHR; the τ p-values are already B
 # Layer integer codes in the saved data: 2 = L2/3, 3 = L4, 4 = L5, 5 = L6.
 const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
 
-# τ_d ROI: which τ_d_e values the bottom row draws. Framed on the L2/3 hierarchy path plus the
-# working point (δ_0 = 4, τd_0 = 5); re-tune if the regenerated data lands elsewhere.
-const TAU_D_MIN = 4.5
-const TAU_D_MAX = 5.5
+# How many Δg_K curves to draw in the bottom row, evenly spaced across the swept range. The sweep
+# has 21 Δg_K values, which bundle into an unreadable band; a handful shows the same ordering and
+# spread while staying legible. Five lands the working point Δg_K₀ = 0.002 exactly on a drawn line.
+const N_GK_LINES = 5
 
-# How many τ_d_e curves to draw in the bottom row, evenly spaced across the τ_d ROI. The sweep has
-# ~17 τ_d_e values in that range, which bundles into an unreadable band; a handful shows the same
-# ordering and spread while staying legible.
-const N_TAU_LINES = 5
-
-# Span of the local window over which the circuit arrow directions are measured
+# Span of the local window over which the circuit arrow directions are measured, centred on
+# (DELTA_CENTER, GK_CENTER). The Δg_K window is centred on the working point.
 const DELTA_DELTA = 0.5
-const DELTA_TAU_D = 0.4
+const DELTA_GK = 0.002
 const DELTA_CENTER = 3.2
-const TAU_D_CENTER = 4.75
+const GK_CENTER = 0.002
 
-# Draw the circuit δ / τ_d direction arrows on the (a, b) panels. Set false to show only the bFNS α/β arrows.
+# Draw the circuit δ / Δg_K direction arrows on the (a, b) panels. Set false to show only the bFNS α/β arrows.
 const SHOW_CIRCUIT_ARROWS = true
-
-# Overlay the L2/3 hierarchy path (region scatter + connecting line) on the δ/τ_d heatmaps.
-const SHOW_DTD_REGIONS = false
 
 # Shared origin of the direction arrows, in (a, b) data coordinates.
 const ARROW_ORIGIN = (0.55, -1.75)
@@ -112,33 +106,61 @@ function seed_pooled_median(cells)
     end
     return out
 end
-# δ/τ_d plane (delta × tau_d_e): the joint E/I-ratio × excitatory-decay plane. Reads its own
-# lookups (dtd_delta, dtd_tau_d_e). The bottom row plots the FULL swept δ range; only τ_d_e is
-# restricted, to the τ_d ROI, so there is no δ crop here any more.
-# The map calls are wrapped in `invokelatest` for Julia 1.12's stricter world-age rules on top-level globals.
-const _A_dtd_full = Base.invokelatest(seed_pooled_median, parent(circuit["a_dtd"]))
-const _B_dtd_full = Base.invokelatest(seed_pooled_median, parent(circuit["b_dtd"]))
-const δ_dtd_lookup = collect(circuit["dtd_delta"])
-const τd_dtd_lookup = collect(circuit["dtd_tau_d_e"])
-const τd_dtd_keep = findall(v -> TAU_D_MIN <= v <= TAU_D_MAX, τd_dtd_lookup)
-const τd_dtd = τd_dtd_lookup[τd_dtd_keep]
-# Default working-regime point (δ_0, τd_0) --- Spatial model defaults snapped to the grid;
-# falls back to the known defaults if the sweep predates saving the anchor.
-const δ_0 = haskey(circuit, "delta_0") ? Float64(circuit["delta_0"]) : 4.0
-const τd_0 = haskey(circuit, "tau_d_e_0") ? Float64(circuit["tau_d_e_0"]) : 5.0
 
-# Mean direction vectors of the circuit forward map in (a, b) on the δ/τ_d plane. Rather than
+"""
+    seed_ci(cells)
+
+Per-cell 95% CI of the exponent ACROSS SEEDS, as `(lower, upper)` matrices laid out like
+[`seed_pooled_median`](@ref). Each seed is first reduced to its own median over that seed's
+neurons, then the median of those (at most 10) per-seed values is bootstrapped.
+
+The interval therefore measures how much a cell's exponent depends on the network realisation,
+and deliberately not the neuron-to-neuron spread, which the pooled median averages away. Note its
+centre is the median of per-seed medians, close to but not identical to the pooled median the
+panels draw: pooling implicitly weights each seed by how many of its neurons were fit. Cells with
+fewer than two surviving seeds stay `NaN`.
+"""
+function seed_ci(cells)
+    n1, n2 = size(cells, 1), size(cells, 2)
+    lo = fill(NaN, n1, n2)
+    hi = fill(NaN, n1, n2)
+    for i in 1:n1, j in 1:n2
+        per = Float64[]
+        for k in axes(cells, 3)
+            v = filter(!isnan, collect(cells[i, j, k]))
+            isempty(v) || push!(per, median(v))
+        end
+        length(per) < 2 && continue
+        _, (l, h) = bootstrapmedian(per)
+        lo[i, j] = l
+        hi[i, j] = h
+    end
+    return lo, hi
+end
+# δ/Δg_K plane (delta × Delta_g_K): the joint E/I-ratio × K-adaptation-conductance plane. Reads its
+# own lookups (delta, Delta_g_K). Both the full swept δ and the full swept Δg_K range are drawn, so
+# nothing is cropped here.
+# The map calls are wrapped in `invokelatest` for Julia 1.12's stricter world-age rules on top-level globals.
+const _A_dg_full = Base.invokelatest(seed_pooled_median, parent(circuit["a_dg"]))
+const _B_dg_full = Base.invokelatest(seed_pooled_median, parent(circuit["b_dg"]))
+# Across-seed 95% CIs for the same grids; exported alongside the panel data, not drawn.
+const _A_dg_ci = Base.invokelatest(seed_ci, parent(circuit["a_dg"]))
+const _B_dg_ci = Base.invokelatest(seed_ci, parent(circuit["b_dg"]))
+const δ_dg_lookup = Float64.(collect(circuit["delta"]))
+const gk_dg_lookup = Float64.(collect(circuit["Delta_g_K"]))
+
+# Mean direction vectors of the circuit forward map in (a, b) on the δ/Δg_K plane. Rather than
 # drawing full isolines, we summarise each knob's effect as a single net displacement
 # F(param_max) − F(param_min), averaged over the other parameter to marginalise out the operating point.
-#   δ arrow:   δ swept over the DELTA_DELTA window, averaged over the τ_d window
-#   τ_d arrow: τ_d swept over the DELTA_TAU_D window, averaged over the δ window
-# The fast-rise/slow-decay corner drives the 2-component MAD fit's first component past 1 (an artefact, not a
-# regime), so mask a > 1 to NaN; mean_direction skips those endpoint cells even though the sweep spans the ROI.
-const _dtd_bad = _A_dtd_full .> 1
-const _A_dtd_arrow = ifelse.(_dtd_bad, NaN, _A_dtd_full)
-const _B_dtd_arrow = ifelse.(_dtd_bad, NaN, _B_dtd_full)
+#   δ arrow:    δ swept over the DELTA_DELTA window, averaged over the Δg_K window
+#   Δg_K arrow: Δg_K swept over the DELTA_GK window, averaged over the δ window
+# The a > 1 mask the δ/τ_d plane needed (its fast-rise/slow-decay corner drove the MAD fit past 1) is
+# kept as a guard, but this plane tops out near 0.64 so it is inert.
+const _dg_bad = _A_dg_full .> 1
+const _A_dg_arrow = ifelse.(_dg_bad, NaN, _A_dg_full)
+const _B_dg_arrow = ifelse.(_dg_bad, NaN, _B_dg_full)
 const δ_arrow_range = (DELTA_CENTER - DELTA_DELTA / 2, DELTA_CENTER + DELTA_DELTA / 2)   # window centered on DELTA_CENTER
-const τd_arrow_range = (TAU_D_CENTER - DELTA_TAU_D / 2, TAU_D_CENTER + DELTA_TAU_D / 2)
+const gk_arrow_range = (GK_CENTER - DELTA_GK / 2, GK_CENTER + DELTA_GK / 2)
 
 "Nearest grid index to a target value in a lookup vector."
 _nearest(lookup, v) = argmin(abs.(lookup .- v))
@@ -174,12 +196,12 @@ function mean_direction(
 end
 
 const δ_dir = mean_direction(
-    _A_dtd_arrow, _B_dtd_arrow, δ_dtd_lookup, δ_arrow_range,
-    τd_dtd_lookup, τd_arrow_range; dim = 1
+    _A_dg_arrow, _B_dg_arrow, δ_dg_lookup, δ_arrow_range,
+    gk_dg_lookup, gk_arrow_range; dim = 1
 )
-const τd_dir = mean_direction(
-    _A_dtd_arrow, _B_dtd_arrow, τd_dtd_lookup, τd_arrow_range,
-    δ_dtd_lookup, δ_arrow_range; dim = 2
+const gk_dir = mean_direction(
+    _A_dg_arrow, _B_dg_arrow, gk_dg_lookup, gk_arrow_range,
+    δ_dg_lookup, δ_arrow_range; dim = 2
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -284,6 +306,24 @@ end
 
 const points_l23 = compute_points(2)   # L2/3
 
+# Variability exponent c (log-log Fano slope over 10^1.5-10^3 ms), derived and cached by
+# scripts/plots/variability_variation.jl: `exponents[layer]` is a (SessionID × Structure) matrix in
+# `structures` order, so c bootstraps over sessions exactly as a and b do. Read rather than refit ---
+# the fit needs the unit-level Fano tables, which are slow to load.
+const variability_path = datadir("variability_variation", "variability_exponents.jld2")
+const c_exponents = if isfile(variability_path)
+    jldopen(f -> f["exponents"], variability_path, "r")
+else
+    @warn "No $variability_path --- run scripts/plots/variability_variation.jl for the c column"
+    nothing
+end
+
+"One region's variability exponents across sessions at `layer_idx`; empty if the cache is absent."
+function region_c(structure, layer_idx)
+    (isnothing(c_exponents) || !haskey(c_exponents, layer_idx)) && return Float64[]
+    return c_exponents[layer_idx][:, findfirst(==(structure), structures)]
+end
+
 # Categorical colour per region, ordered low → high hierarchy (`structures` is
 # already in ascending-score order). Scatter points and the colorbar draw from
 # this same discrete gradient so they stay consistent.
@@ -291,12 +331,17 @@ const region_colors = cgrad(binarysunset, length(structures); categorical = true
 const structure_color = Dict(s => region_colors[i] for (i, s) in enumerate(structures))
 const HEATMAP = sunrise
 const δlab = "δ  (I:E ratio)"
+const gklab = "Δg_K  (mS/cm²)"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Hero-panel drawer. The circuit sweep curves and operating-point marker are
-# layer-independent (the circuit doesn't have cortical layers), so they appear
-# identically in both bottom panels; only the data scatter + trajectory change.
-# ──────────────────────────────────────────────────────────────────────────────
+const ARROWS = SHOW_CIRCUIT_ARROWS ? (
+        ("δ", δ_dir, qinghai),
+        ("Δg_K", gk_dir, seohae),
+        ("α", α_dir, baikal),
+        ("β", β_dir, bermejo),
+    ) : (
+        ("α", α_dir, baikal),
+        ("β", β_dir, bermejo),
+    )
 
 "Place `label` just past an arrow tip (`anchor + vec`), nudged ~14 px further
 along the arrow in pixel space and coloured to match."
@@ -318,7 +363,7 @@ function plot_hero!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1
 
     # Mean-direction arrows, all sharing one origin fixed at ARROW_ORIGIN in (a, b)
     # data coordinates (plus an optional per-panel `arrow_offset` in data units).
-    # Two read the circuit forward map (δ, τ_d), two read the bFNS theory map (α, β).
+    # Two read the circuit forward map (δ, Δg_K), two read the bFNS theory map (α, β).
     # We only care about the *angle*: each vector is normalised to display units (each
     # component ÷ its axis range) so it points along the direction read off the panel,
     # then drawn at a fixed length. Magnitude is discarded.
@@ -333,18 +378,10 @@ function plot_hero!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1
         return (u[1] / n * ra, u[2] / n * rb) .* arrow_len
     end
 
-    # All four arrows share the origin: circuit knobs (δ, τ_d) in green/orange,
-    # bFNS orders in blue/red. (vector, label, colour).
-    arrows = SHOW_CIRCUIT_ARROWS ? (
-            (scaled(δ_dir), "δ", qinghai),
-            (scaled(τd_dir), "τ_d", seohae),
-            (scaled(α_dir), "α", baikal),
-            (scaled(β_dir), "β", bermejo),
-        ) : (
-            (scaled(α_dir), "α", baikal),
-            (scaled(β_dir), "β", bermejo),
-        )
-    for (v, label, color) in arrows
+    # All the arrows share the origin: circuit knobs (δ, Δg_K) in green/orange, bFNS orders in
+    # blue/red. `ARROWS` holds the raw displacements; `scaled` is display normalisation only.
+    for (label, raw, color) in ARROWS
+        v = scaled(raw)
         arrows2d!(
             ax, [Point2f(ox, oy)], [Vec2f(v...)];
             color, tipwidth = 12, tiplength = 12, shaftwidth = 2.5
@@ -445,40 +482,45 @@ begin # * Top right — hierarchy correlation of each exponent across cortical d
     Box(gs[2][1, 2]; visible = false, width = 12)
 end
 
+"Indices into `gk_dg_lookup` of the Δg_K values the bottom row draws: `nlines` evenly spaced across
+the swept range. Shared by the drawing and the saved source data so the two cannot disagree."
+function drawn_gks(nlines = N_GK_LINES)
+    return unique(round.(Int, range(1, length(gk_dg_lookup); length = nlines)))
+end
+
 """
     circuit_lines!(pos, grid; ylabel, title)
 
-`N_TAU_LINES` lines, evenly spaced across the τ_d_e ROI, plotted against δ over the full swept
-range. Replaces the earlier heatmap: lines show the δ-dependence
-and the spread across τ_d_e more directly than a colour scale, and they make the saturation at
-high δ legible. The colorbar is categorical and ticked with the τ_d_e values actually drawn, so
-it is a legend for the lines rather than a continuous scale over values that are not shown.
+`N_GK_LINES` lines, evenly spaced across the swept Δg_K range, plotted against δ over the full swept
+range. Lines rather than a heatmap: they show the δ-dependence and the spread across Δg_K more
+directly than a colour scale, and they make the saturation at high δ legible. The colorbar is
+categorical and ticked with the Δg_K values actually drawn, so it is a legend for the lines rather
+than a continuous scale over values that are not shown.
 """
-function circuit_lines!(pos, grid; ylabel, title, nlines = N_TAU_LINES)
+function circuit_lines!(pos, grid; ylabel, title, nlines = N_GK_LINES)
     ax = Axis(pos[1, 1]; xlabel = δlab, ylabel = ylabel, title = title)
-    n = min(nlines, length(τd_dtd_keep))
-    sel = unique(τd_dtd_keep[round.(Int, range(1, length(τd_dtd_keep); length = n))])
+    sel = drawn_gks(nlines)
     cols = cgrad(HEATMAP, max(2, length(sel)); categorical = true)
     for (i, j) in enumerate(sel)
         v = grid[:, j]
         k = findall(!isnan, v)
         isempty(k) && continue
-        lines!(ax, δ_dtd_lookup[k], v[k]; color = cols[i], linewidth = 2.5)
+        lines!(ax, δ_dg_lookup[k], v[k]; color = cols[i], linewidth = 2.5)
     end
     Colorbar(
         pos[1, 2]; colormap = cols, limits = (0, length(sel)),
-        ticks = ((1:length(sel)) .- 0.5, string.(round.(τd_dtd_lookup[sel]; digits = 2))),
-        label = "τ_d_e (ms)", width = 12
+        ticks = ((1:length(sel)) .- 0.5, string.(gk_dg_lookup[sel])),
+        label = gklab, width = 12
     )
     return ax
 end
 
-begin # * Bottom row — circuit exponents against δ, one line per τ_d_e
-    ax_dtd_a = circuit_lines!(
-        gs[3], _A_dtd_full; ylabel = "Diffusion exponent  a", title = "Circuit:  a vs δ"
+begin # * Bottom row — circuit exponents against δ, one line per Δg_K
+    ax_dg_a = circuit_lines!(
+        gs[3], _A_dg_full; ylabel = "Diffusion exponent  a", title = "Circuit:  a vs δ"
     )
-    ax_dtd_b = circuit_lines!(
-        gs[4], _B_dtd_full; ylabel = "Spectral exponent  b", title = "Circuit:  b vs δ"
+    ax_dg_b = circuit_lines!(
+        gs[4], _B_dg_full; ylabel = "Spectral exponent  b", title = "Circuit:  b vs δ"
     )
 end
 
@@ -492,9 +534,195 @@ Colorbar(
 Label(gs[1][1, 2, Top()], "Higher"; fontsize = 12, padding = (0, 0, -6, 0))
 Label(gs[1][1, 2, Bottom()], "Lower"; fontsize = 12, padding = (0, 0, 0, 4))
 
+"""
+    save_source_data()
+
+One tab-separated file per panel in `outdir`, holding exactly the values that panel draws. Display
+encodings are left out (colours, marker sizes, filled-vs-open significance, and the arrows'
+display-normalised length, which is discarded by `plot_hero!` anyway). The arrows' raw `(Δa, Δb)`
+displacements ARE kept: they are the panel's quantitative claim and are recoverable from no other
+file. Reuses the objects the figure was drawn from, so the files cannot drift from the panels.
+"""
+function save_source_data()
+    # a --- the region scatter with its session-bootstrap 95% CIs.
+    writedlm(
+        joinpath(outdir, "panelA.tsv"),
+        vcat(
+            ["structure" "hierarchy" "a" "a_lo" "a_hi" "b" "b_lo" "b_hi"],
+            reduce(
+                vcat,
+                [
+                    permutedims([p.structure, p.h, p.a, p.a_lo, p.a_hi, p.b, p.b_lo, p.b_hi])
+                        for p in points_l23
+                ]
+            )
+        ), '\t'
+    )
+    # a --- the direction arrows: net (Δa, Δb) displacement per knob, plus their shared origin.
+    writedlm(
+        joinpath(outdir, "panelA_arrows.tsv"),
+        vcat(
+            ["knob" "origin_a" "origin_b" "da" "db"],
+            reduce(
+                vcat,
+                [
+                    permutedims([lab, ARROW_ORIGIN[1], ARROW_ORIGIN[2], v[1], v[2]])
+                        for (lab, v, _) in ARROWS
+                ]
+            )
+        ), '\t'
+    )
+    # b --- Kendall 𝜏 against hierarchy at each depth. Long format: the two exponents are separate
+    # series and need not share a depth grid.
+    rows = Any[]
+    for (key, sym, _) in τ_panels
+        d = plot_data[key][stim]
+        for (dep, t, s, 𝑝) in zip(collect(d.unidepths), collect(d.μ), collect(d.σ), collect(d.𝑝))
+            push!(rows, permutedims([sym, dep, t, first(s), last(s), 𝑝]))
+        end
+    end
+    writedlm(
+        joinpath(outdir, "panelB.tsv"),
+        vcat(["exponent" "depth" "tau" "lo" "hi" "p"], reduce(vcat, rows)), '\t'
+    )
+    # c, d --- the circuit lines: δ against the exponent, one column per Δg_K drawn. `NaN` marks
+    # the grid cells the panel skips. Each panel also gets `_lower`/`_upper` files holding the
+    # across-seed 95% CI (see `seed_ci`) on the identical grid, so a band can be reconstructed
+    # column-by-column without re-reading the sweep.
+    sel = drawn_gks()
+    hdr = hcat("delta", permutedims(["Delta_g_K=$(gk_dg_lookup[j])" for j in sel]))
+    for (name, grid, ci) in
+        (("panelC", _A_dg_full, _A_dg_ci), ("panelD", _B_dg_full, _B_dg_ci))
+        for (suffix, g) in (("", grid), ("_lower", first(ci)), ("_upper", last(ci)))
+            writedlm(
+                joinpath(outdir, "$name$suffix.tsv"),
+                vcat(hdr, hcat(δ_dg_lookup, g[:, sel])), '\t'
+            )
+        end
+    end
+    return @info "Saved source data to $outdir"
+end
+
+"""
+    save_statistics(layer_idx = 2)
+
+`statistics.tsv`: the three exponents at one layer --- diffusion `a`, spectral `b` and variability
+`c` --- each as a session-bootstrap median with its 95% CI, per region and pooled over every
+(session, region) pair. These are the numbers quoted in the text; the panels themselves draw only
+`a` and `b`, so `save_source_data` does not carry `c`. `a` and `b` are taken from `points_l23` so
+the file cannot disagree with panel a.
+"""
+function save_statistics(layer_idx = 2)
+    rows = map(points_l23) do p
+        cm, (clo, chi) = bootstrapmedian(region_c(p.structure, layer_idx))
+        permutedims([p.structure, p.h, p.a, p.a_lo, p.a_hi, p.b, p.b_lo, p.b_hi, cm, clo, chi])
+    end
+    pool(f) = reduce(vcat, [collect(f(p.structure, layer_idx)) for p in points_l23])
+    am, (alo, ahi) = bootstrapmedian(pool(region_a))
+    bm, (blo, bhi) = bootstrapmedian(pool(region_b))
+    cm, (clo, chi) = bootstrapmedian(pool(region_c))
+    push!(rows, permutedims(["pooled", NaN, am, alo, ahi, bm, blo, bhi, cm, clo, chi]))
+    writedlm(
+        joinpath(outdir, "statistics.tsv"),
+        vcat(
+            ["structure" "hierarchy" "a" "a_lo" "a_hi" "b" "b_lo" "b_hi" "c" "c_lo" "c_hi"],
+            reduce(vcat, rows)
+        ), '\t'
+    )
+    @info "$(layer_names[layer_idx]) pooled across regions: " *
+        "a = $(round(am, digits = 3)) [$(round(alo, digits = 3)), $(round(ahi, digits = 3))], " *
+        "b = $(round(bm, digits = 3)) [$(round(blo, digits = 3)), $(round(bhi, digits = 3))], " *
+        "c = $(round(cm, digits = 3)) [$(round(clo, digits = 3)), $(round(chi, digits = 3))]"
+    return @info "Saved statistics to $(joinpath(outdir, "statistics.tsv"))"
+end
+
+"""
+    save_surrogate_statistics(layer_idx = 2)
+
+`surrogate_statistics.tsv`: the two surrogate-controlled statistics of the experimental LFP at one
+layer --- excess kurtosis of the single-sample increments and the diffusion exponent `a` --- each as
+the session median of the data value, of the surrogate null, and of their paired difference, per
+region and pooled.
+
+The null is FT (phase randomisation), i.e. a linear Gaussian process with the data's power spectrum,
+so both statistics are one-sided LARGER than the null. Excess kurtosis has null value exactly 0 by
+construction, making the data value itself the effect size; for `a` the difference is
+`ζ(1) − ζ(2)/2`, the first-order intermittency coefficient, which vanishes for any monofractal
+process. `p` is an exact sign test across sessions (a signed-rank would need HypothesisTests, which
+this project does not carry); with the observed consistency it is far from the deciding factor.
+
+Reads `WRExperiment/data/surrogates_ft`, written by `WRExperiment/scripts/run_surrogates.jl`. Skips
+with a warning if that sweep has not been run.
+"""
+function save_surrogate_statistics(layer_idx = 2)
+    dir = projectdir("WRExperiment", "data", "surrogates_ft")
+    files = isdir(dir) ? filter(contains("stimulus=$stim"), readdir(dir; join = true)) : String[]
+    if isempty(files)
+        @warn "No surrogate sweep in $dir --- run WRExperiment/scripts/run_surrogates.jl"
+        return nothing
+    end
+
+    # One row per (session, region): the median over this layer's channels, for the data and for the
+    # mean of the surrogate draws. Aggregation is replicated inside the null so the two are comparable.
+    rows = filter(!isnothing, map(files) do f
+        D = jldopen(g -> Dict(k => g[k] for k in keys(g)), f)
+        haskey(D, "error") && return nothing
+        sel = findall(D["layernums"] .== layer_idx)
+        length(sel) < 2 && return nothing
+        m = match(r"sessionid=(\d+).*structure=([A-Za-z0-9\-]+)\.jld2", basename(f))
+        agg(v, j) = median(filter(!isnan, getfield(v, j)[sel]))
+        (
+            structure = String(m[2]),
+            kurt = agg(D["s0"], :kurt), kurt_null = mean(agg.(D["s"], :kurt)),
+            a = agg(D["s0"], :a), a_null = mean(agg.(D["s"], :a)),
+        )
+    end)
+
+    "Exact one-sided sign test: P(at least k of n positive | fair coin). BigInt keeps it exact."
+    signtest(d) = (n = length(d); k = count(>(0), d);
+        Float64(sum(binomial(big(n), big(i)) for i in k:n) / big(2)^n))
+
+    function summarise(label, rs)
+        isempty(rs) && return nothing
+        dk = [r.kurt - r.kurt_null for r in rs]
+        da = [r.a - r.a_null for r in rs]
+        return permutedims([
+            label, length(rs),
+            median(getfield.(rs, :kurt)), median(getfield.(rs, :kurt_null)), median(dk),
+            signtest(dk), count(>(0), dk),
+            median(getfield.(rs, :a)), median(getfield.(rs, :a_null)), median(da),
+            signtest(da), count(>(0), da),
+        ])
+    end
+
+    out = filter(
+        !isnothing, [
+            [summarise(s, filter(r -> r.structure == s, rows)) for s in structures]...,
+            summarise("pooled", rows),
+        ]
+    )
+    writedlm(
+        joinpath(outdir, "surrogate_statistics.tsv"),
+        vcat(
+            [
+                "structure" "n_sessions" "kurtosis" "kurtosis_null" "kurtosis_delta" "kurtosis_p" "kurtosis_consistent" "a" "a_null" "a_delta" "a_p" "a_consistent"
+            ],
+            reduce(vcat, out)
+        ), '\t'
+    )
+    pooled = only(filter(r -> first(r) == "pooled", out))
+    @info "$(layer_names[layer_idx]) pooled: excess kurtosis = $(round(pooled[3], digits = 3)) " *
+        "(null $(round(pooled[4], digits = 3))), a = $(round(pooled[8], digits = 3)) " *
+        "(null $(round(pooled[9], digits = 3)))"
+    return @info "Saved statistics to $(joinpath(outdir, "surrogate_statistics.tsv"))"
+end
+
 addlabels!(f)
 display(f)
 outfile = joinpath(outdir, "hierarchical_variation.pdf")
 wsave(outfile, f)
 wsave(joinpath(outdir, "hierarchical_variation.png"), f)   # raster preview
 @info "Saved $outfile"
+save_source_data()
+save_statistics()
+save_surrogate_statistics()
