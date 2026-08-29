@@ -44,7 +44,8 @@ const SHOW_CIRCUIT_ARROWS = true
 # Shared origin of the direction arrows, in (a, b) data coordinates.
 const ARROW_ORIGIN = (0.55, -1.75)
 
-const outdir = plotsdir("hierarchical_variation")
+NAME = "Fig4_hierarchical_variation"
+outdir = plotsdir(NAME)
 mkpath(outdir)
 
 # Stored ToolsArrays/DimArrays load as real DimArrays via TimeseriesBase's `toolsarray_typemap`; custom
@@ -664,35 +665,41 @@ function save_surrogate_statistics(layer_idx = 2)
 
     # One row per (session, region): the median over this layer's channels, for the data and for the
     # mean of the surrogate draws. Aggregation is replicated inside the null so the two are comparable.
-    rows = filter(!isnothing, map(files) do f
-        D = jldopen(g -> Dict(k => g[k] for k in keys(g)), f)
-        haskey(D, "error") && return nothing
-        sel = findall(D["layernums"] .== layer_idx)
-        length(sel) < 2 && return nothing
-        m = match(r"sessionid=(\d+).*structure=([A-Za-z0-9\-]+)\.jld2", basename(f))
-        agg(v, j) = median(filter(!isnan, getfield(v, j)[sel]))
-        (
-            structure = String(m[2]),
-            kurt = agg(D["s0"], :kurt), kurt_null = mean(agg.(D["s"], :kurt)),
-            a = agg(D["s0"], :a), a_null = mean(agg.(D["s"], :a)),
-        )
-    end)
+    rows = filter(
+        !isnothing, map(files) do f
+            D = jldopen(g -> Dict(k => g[k] for k in keys(g)), f)
+            haskey(D, "error") && return nothing
+            sel = findall(D["layernums"] .== layer_idx)
+            length(sel) < 2 && return nothing
+            m = match(r"sessionid=(\d+).*structure=([A-Za-z0-9\-]+)\.jld2", basename(f))
+            agg(v, j) = median(filter(!isnan, getfield(v, j)[sel]))
+            (
+                structure = String(m[2]),
+                kurt = agg(D["s0"], :kurt), kurt_null = mean(agg.(D["s"], :kurt)),
+                a = agg(D["s0"], :a), a_null = mean(agg.(D["s"], :a)),
+            )
+        end
+    )
 
     "Exact one-sided sign test: P(at least k of n positive | fair coin). BigInt keeps it exact."
-    signtest(d) = (n = length(d); k = count(>(0), d);
-        Float64(sum(binomial(big(n), big(i)) for i in k:n) / big(2)^n))
+    signtest(d) = (
+        n = length(d); k = count(>(0), d);
+        Float64(sum(binomial(big(n), big(i)) for i in k:n) / big(2)^n)
+    )
 
     function summarise(label, rs)
         isempty(rs) && return nothing
         dk = [r.kurt - r.kurt_null for r in rs]
         da = [r.a - r.a_null for r in rs]
-        return permutedims([
-            label, length(rs),
-            median(getfield.(rs, :kurt)), median(getfield.(rs, :kurt_null)), median(dk),
-            signtest(dk), count(>(0), dk),
-            median(getfield.(rs, :a)), median(getfield.(rs, :a_null)), median(da),
-            signtest(da), count(>(0), da),
-        ])
+        return permutedims(
+            [
+                label, length(rs),
+                median(getfield.(rs, :kurt)), median(getfield.(rs, :kurt_null)), median(dk),
+                signtest(dk), count(>(0), dk),
+                median(getfield.(rs, :a)), median(getfield.(rs, :a_null)), median(da),
+                signtest(da), count(>(0), da),
+            ]
+        )
     end
 
     out = filter(
@@ -705,7 +712,7 @@ function save_surrogate_statistics(layer_idx = 2)
         joinpath(outdir, "surrogate_statistics.tsv"),
         vcat(
             [
-                "structure" "n_sessions" "kurtosis" "kurtosis_null" "kurtosis_delta" "kurtosis_p" "kurtosis_consistent" "a" "a_null" "a_delta" "a_p" "a_consistent"
+            "structure" "n_sessions" "kurtosis" "kurtosis_null" "kurtosis_delta" "kurtosis_p" "kurtosis_consistent" "a" "a_null" "a_delta" "a_p" "a_consistent"
             ],
             reduce(vcat, out)
         ), '\t'
@@ -719,9 +726,9 @@ end
 
 addlabels!(f)
 display(f)
-outfile = joinpath(outdir, "hierarchical_variation.pdf")
+outfile = joinpath(outdir, "$NAME.pdf")
 wsave(outfile, f)
-wsave(joinpath(outdir, "hierarchical_variation.png"), f)   # raster preview
+wsave(joinpath(outdir, "$NAME.png"), f)   # raster preview
 @info "Saved $outfile"
 save_source_data()
 save_statistics()

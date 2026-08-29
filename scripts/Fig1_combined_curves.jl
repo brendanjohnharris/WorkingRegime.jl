@@ -10,11 +10,14 @@ using CairoMakie
 using Fathom
 using TimeseriesTools
 using TimeseriesBase
+using Optim
+using ForwardDiff # MAPPLE's `fit!` lives in TimeseriesTools' OptimExt; without both it silently degrades
 using Statistics
 using Random
 using LinearAlgebra
 using DelimitedFiles
 using Printf
+import ImageMagick # rasterises brain.pdf in pdfpanel!
 
 set_theme!(Fathom.fathom())
 
@@ -43,19 +46,29 @@ end
 _select(x, sels::Pair...) = getindex(x; (Symbol(n) => At(v) for (n, v) in sels)...)
 
 """
-    placeholder!(gp; aspect = 1)
+    pdfpanel!(gp, pdf; dpi = 600)
 
-An empty framed square standing in for an external illustration (here the brain render), so the
-layout is final before the artwork is dropped in. Fathom has no such helper in the pinned version.
+`pdf` rendered at `dpi` into a decoration-free axis, cached as a png in `data/` and re-rendered
+whenever the PDF is newer. Rasterised by ImageMagick; the resolution must be set on the wand
+BEFORE reading, since a bare `FileIO.load` renders PDFs at 72 dpi. MakieTeX's `PDFDocument` would
+keep the artwork vector, but its newest release (0.4.3) pins Makie 0.21 against this project's
+0.24, so it cannot resolve here; the brain render is embedded raster anyway, so nothing is lost.
 """
-function placeholder!(gp; aspect = 1, label = "")
-    ax = Axis(gp; aspect, xgridvisible = false, ygridvisible = false)
+function pdfpanel!(gp, pdf; dpi = 600)
+    png = datadir(first(splitext(basename(pdf))) * ".png")
+    if !isfile(png) || mtime(png) < mtime(pdf)
+        wand = ImageMagick.MagickWand()
+        ccall(
+            (:MagickSetResolution, ImageMagick.libwand), Cint,
+            (Ptr{Cvoid}, Cdouble, Cdouble), wand, dpi, dpi
+        )
+        ImageMagick.readimage(wand, pdf)
+        ImageMagick.writeimage(wand, png)
+    end
+    ax = Axis(gp; aspect = DataAspect())
     hidedecorations!(ax)
-    isempty(label) ||
-        text!(
-        ax, 0.5, 0.5; text = label, space = :relative, align = (:center, :center),
-        color = (:gray, 0.6), fontsize = 12
-    )
+    hidespines!(ax)
+    image!(ax, rotr90(wload(png)))
     return ax
 end
 
@@ -106,6 +119,49 @@ end
 
 gaussian(x) = exp(-x^2 / 2) / sqrt(2π)
 normalise(x) = (x .- minimum(x)) ./ (maximum(x) - minimum(x))
+
+"Map `y` into the log-space min-max frame of the drawn curve `ref`, so a fit overlays
+`exp10.(normalise(log10.(ref)))` with its position and log-log slope relative to that curve intact."
+lognorm(y, ref) = exp10.(
+    (log10.(y) .- minimum(log10.(ref))) ./
+        (maximum(log10.(ref)) - minimum(log10.(ref)))
+)
+
+# MAPPLE fits to the DISPLAYED (median) curves, replacing the mixed estimators previously read from
+# the calculation outputs (the experiment quoted a median of per-channel fits, the circuit a fit to
+# its own median curve). Settings mirror each side's calculation script --- experiment PSD:
+# `WRExperiment.mapple_fit` (2 peaks over PSD_RANGE = 3-500 Hz); circuit PSD: demo_run.jl
+# `fit_spectrum` (1 peak, 10-1000 Hz); both MADs: `diffusion_line`/`fit_mad` (1 component, 0 peaks,
+# log-weighted over the shared 0-8 ms band) --- except the PSDs get TWO aperiodic components so both
+# frequency regimes can be drawn.
+"2-component MAPPLE fit of a PSD curve, log-sampled over `f_range`. Peak-normalised first: β is
+scale-invariant, and raw Float32-origin densities (~1e-12) underflow MAPPLE's log floor."
+function psd_mapple(f, power; f_range, peaks)
+    s = ToolsArray(power ./ maximum(power), (𝑓(f),))
+    p = logsample(s[𝑓 = f_range])
+    m = fit(MAPPLE, p; components = 2, peaks)
+    fit!(m, p) # sorts components by breakpoint, so `last(betas(m))` is the high-frequency slope
+    return m
+end
+
+"1-component, 0-peak MAPPLE fit of a MAD curve over `band` (seconds)."
+function mad_mapple(t, vals; band = 0.0 .. 8.0e-3) # WRExperiment.MAD_BAND == WRCircuit.MAD_BAND_MS/1000
+    y = ToolsArray(vals, (𝑡(t),))[𝑡 = band]
+    m = fit(MAPPLE, y; components = 1, peaks = 0)
+    fit!(m, y; w = true)
+    return m
+end
+
+"Each aperiodic component of a fitted MAPPLE as a pure power law over `f` (no peaks, no crossfade),
+with amplitudes chained for continuity at the breakpoints, exactly as `mapple!` evaluates them."
+function component_lines(m, f)
+    βs, bps = betas(m), breakpoints(m)
+    As = [exp10(m.params.log_A)]
+    for j in 2:length(βs)
+        push!(As, As[end] * exp10(bps[j - 1])^(βs[j - 1] - βs[j]))
+    end
+    return [A .* f .^ β for (A, β) in zip(As, βs)]
+end
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Data (everything is read; nothing is computed here)
@@ -359,14 +415,16 @@ function circuit_trace_panels!(gl; ts = (FIELD_TINDEX - 5000):FIELD_TINDEX, stri
     return (; gtr, gd, axv, axr, axi, axvd, axid)
 end
 
-"MAD, PSD and Fano factor, experiment against circuit; the bottom block of the figure."
 function combined_curves_panels!(gl)
     mad = plot_data["mad_curves"][STIM]
     psd = plot_data["spectral_curves"][STIM]["VISp"]
     fano = plot_data["fano_curves"][STIM]
 
     # * MAD. Both curves are min-max normalised in log space, so only the SLOPES are comparable;
-    #   the fitted lines are drawn over the band each exponent was fit on.
+    #   each dashed line is a MAPPLE fit computed HERE on the drawn median curve, drawn over the
+    #   band it was fit on.
+    mfit_exp = mad_mapple(mad.t_all, mad.mu)
+    mfit_circ = mad_mapple(circuit.mad.t, circuit.mad.mu)
     axm = Axis(
         gl[1, 1]; ylabel = "MAD (arb. units)", xlabel = "Time lag (s)", title = "Diffusion",
         xscale = log10, yscale = log10,
@@ -380,10 +438,9 @@ function combined_curves_panels!(gl)
         axm, mad.t_all, exp10.(normalise(log10.(mad.mu)));
         color = experiment_color, label = "Experiment\n(LFP)"
     )
-    mad_fit_vals = exp10.(mad.meanintercept .+ mad.meanslope .* log10.(mad.fit_t))
     idxs = mad.fit_t .< 0.005
     lines!(
-        axm, mad.fit_t[idxs] .* 2, exp10.(normalise(log10.(mad_fit_vals)))[idxs];
+        axm, mad.fit_t[idxs] .* 2, lognorm(predict(mfit_exp, mad.fit_t), mad.mu)[idxs];
         linestyle = :dash, color = experiment_color
     )
     lines!(
@@ -392,47 +449,51 @@ function combined_curves_panels!(gl)
     )
     idxs = circuit.mad.fit_t .< 0.005
     lines!(
-        axm, circuit.mad.fit_t[idxs] ./ 2, exp10.(normalise(log10.(circuit.mad.fit_vals)))[idxs];
+        axm, circuit.mad.fit_t[idxs] ./ 2,
+        lognorm(predict(mfit_circ, circuit.mad.fit_t), circuit.mad.mu)[idxs];
         color = circuit_color, linestyle = :dash
     )
     text!(
-        axm, 1.0e-2, 10^0.7; text = "a = $(round(mad.meanslope, sigdigits = 2))",
+        axm, 1.0e-2, 10^0.7; text = "a = $(round(only(betas(mfit_exp)), sigdigits = 2))",
         color = experiment_color, align = (:left, :top)
     )
     text!(
-        axm, 10^(-3.35), 10^1; text = "a = $(round(circuit.mad.exponent, sigdigits = 2))",
+        axm, 10^(-3.35), 10^1; text = "a = $(round(only(betas(mfit_circ)), sigdigits = 2))",
         color = circuit_color, align = (:left, :top)
     )
     axislegend(axm; position = :rb, framevisible = false)
 
-    # * PSD. The dashed lines are the APERIODIC component of each fit, a straight line in log-log
-    #   whose slope is exactly the quoted exponent; only the slope carries information.
+    # * PSD. The dashed lines are the two APERIODIC components of each fit, each a straight line in
+    #   log-log extended over the full drawn band (peaks omitted); the quoted exponent is the slope
+    #   of the high-frequency component. Fixed y-limits: the shallow component extrapolated to high
+    #   frequency clips at the frame instead of rescaling the axis.
+    μn = psd.μ ./ maximum(psd.μ)                     # same units as psd_mapple fits in
+    cμn = circuit.psd.mu ./ maximum(circuit.psd.mu)
+    pfit_exp = psd_mapple(psd.f, psd.μ; f_range = 3 .. 500, peaks = 2)
+    pfit_circ = psd_mapple(circuit.psd.f, circuit.psd.mu; f_range = 10 .. 1000, peaks = 1)
     axp = Axis(
         gl[1, 2]; xlabel = "Frequency (Hz)", ylabel = "PSD (arb. units)", title = "Power spectrum",
         xscale = log10, yscale = log10,
-        xticks = [3, 10, 30, 100], limits = ((2, 500), nothing)
+        xticks = [3, 10, 30, 100], limits = ((2, 500), (0.5, 30))
     )
     lines!(axp, psd.f, exp10.(normalise(log10.(psd.μ))); color = (experiment_color, 0.8))
     band!(
         axp, psd.f, exp10.(normalise(log10.(psd.σl))), exp10.(normalise(log10.(psd.σh)));
         color = (experiment_color, 0.32)
     )
-    lines!(
-        axp, psd.f, 1.25 .* exp10.(normalise(log10.(psd.f .^ psd.spectral_exponent_median)));
-        color = experiment_color, linestyle = :dash
-    )
+    for comp in component_lines(pfit_exp, psd.f)
+        lines!(axp, psd.f, lognorm(comp, μn); color = experiment_color, linestyle = :dash)
+    end
     lines!(axp, circuit.psd.f, exp10.(normalise(log10.(circuit.psd.mu))) .* 1.35; color = circuit_color)
-    lines!(
-        axp, circuit.psd.fit_f,
-        1.25 .* exp10.(normalise(log10.(circuit.psd.fit_f .^ circuit.psd.exponent)));
-        color = circuit_color, linestyle = :dash
-    )
+    for comp in component_lines(pfit_circ, circuit.psd.f)
+        lines!(axp, circuit.psd.f, lognorm(comp, cμn) .* 1.35; color = circuit_color, linestyle = :dash)
+    end
     text!(
-        axp, 7, 10^0.4; text = "b = $(round(psd.spectral_exponent_median; sigdigits = 3))",
+        axp, 7, 10^0.4; text = "b = $(round(last(betas(pfit_exp)); sigdigits = 3))",
         color = experiment_color, align = (:left, :top)
     )
     text!(
-        axp, 20, 10; text = "b = $(round(circuit.psd.exponent; sigdigits = 3))",
+        axp, 20, 10; text = "b = $(round(last(betas(pfit_circ)); sigdigits = 3))",
         color = circuit_color, align = (:left, :bottom)
     )
 
@@ -462,7 +523,7 @@ function combined_curves_panels!(gl)
         axf, 0.001 .* 1.2, 1.4; text = "c = $(round(circuit.fano.exponent, digits = 2))",
         color = circuit_color, align = (:left, :center)
     )
-    return axm, axp, axf
+    return (; axm, axp, axf, mfit_exp, mfit_circ, pfit_exp, pfit_circ)
 end
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -475,8 +536,8 @@ begin # * Render
     gmid = f[2, 1] = GridLayout()
     gbot = f[3, 1] = GridLayout()
 
-    # Top: illustration placeholder | LFP + raster | increment distribution
-    ax_brain = placeholder!(gtop[1, 1]; label = "brain illustration")
+    # Top: brain illustration | LFP + raster | increment distribution
+    ax_brain = pdfpanel!(gtop[1, 1], projectdir("brain.pdf"))
     g_traces = gtop[1, 2] = GridLayout()
     traces_panel!(g_traces, traces)
     ax_incr = Axis(
@@ -494,8 +555,8 @@ begin # * Render
     ctr = circuit_trace_panels!(g_ctr)
     colsize!(gmid, 1, Relative(0.36))
 
-    # Bottom: the combined curves
-    combined_curves_panels!(gbot)
+    # Bottom: the combined curves; `cc` carries the MAPPLE fits quoted on the panels
+    cc = combined_curves_panels!(gbot)
 
     rowsize!(f.layout, 1, Relative(0.3))
     rowsize!(f.layout, 2, Relative(0.38))
@@ -568,6 +629,11 @@ begin # * Statistics --- the same files plot_demo_run.jl and combined_curves.jl 
                 println(io, "circuit $label exponent: $(sub.exponent)")
             end
         end
+        # The numbers actually printed on the figure: MAPPLE re-fits of the drawn median curves.
+        println(io, "figure mad a (fit to drawn median): experiment $(only(betas(cc.mfit_exp))), circuit $(only(betas(cc.mfit_circ)))")
+        println(io, "figure psd b (high-f component): experiment $(last(betas(cc.pfit_exp))), circuit $(last(betas(cc.pfit_circ)))")
+        println(io, "figure psd b (low-f component): experiment $(first(betas(cc.pfit_exp))), circuit $(first(betas(cc.pfit_circ)))")
+        println(io, "figure psd breakpoint (Hz): experiment $(exp10(first(breakpoints(cc.pfit_exp)))), circuit $(exp10(first(breakpoints(cc.pfit_circ))))")
     end
 
     open(joinpath(outdir, "increment_statistics.txt"), "w") do io

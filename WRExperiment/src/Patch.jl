@@ -21,7 +21,15 @@ import HypothesisTests: MannWhitneyUTest, SignedRankTest, pvalue
 # falling to a flat noise floor (VISp spontaneous median: local slope -14 over 500-625 Hz, PSD down
 # 20x by 550 Hz and flat thereafter). Fitting through it steepens the aperiodic slope by ~0.16
 # (median curve: b = -1.49 over 3-500 Hz vs -1.65 over 3-625 Hz), so the cliff is excluded.
-const PSD_RANGE = [3, 500]
+const PSD_RANGE = [1, 500]
+
+# Frequency of the low-frequency knee, where the LFP spectrum leaves its shallow sub-3 Hz regime.
+# Located at 2.8 Hz by an unconstrained 2-component fit to the session-median curve, which finds it
+# reliably there; per channel the same fit is bimodal (it lands on the ~45 Hz gamma bend in most
+# channels instead), so the knee is fixed at the group estimate rather than fit per curve. Used as
+# `spectral_fit`'s inner knot, and it is why `PSD_RANGE` starts below it: the low arm needs data on
+# its own side of the knee.
+const PSD_KNEE = 3.0
 
 # Band over which the diffusion exponent is fit, IN SECONDS (the LFP lag axis is in seconds; the
 # circuit's `WRCircuit.MAD_BAND_MS` is in milliseconds, so the numeric values differ by 1000x even
@@ -73,16 +81,36 @@ function produce_unitdepths(session::AN.AbstractSession)
     return D
 end
 
-# Spectral aperiodic fit via MAPPLE (replaces the FOOOF/AllenNeuropixels `aperiodicfit`). Mirrors WRCircuit's
-# `spectral_exponents`: log-sample the PSD over PSD_RANGE, fit a 1-component/1-peak MAPPLE, read the aperiodic
-# slope. χ is returned with FOOOF's sign (positive), so the pipeline's `-χ` gives the same (negative) spectral
-# exponent and matches the circuit. Returns `(ff, Dict(:χ,:b,:k))` --- same shape callers expect from FOOOF.
-# NOTE: MAPPLE's `fit!` lives in TimeseriesTools' OptimExt --- needs Optim + ForwardDiff loaded or it NaNs.
+"""
+    mapple_fit(x)
+
+Spectral aperiodic fit: a 2-component, 2-peak MAPPLE over `PSD_RANGE` with BOTH knots held fixed
+--- the inner one at [`PSD_KNEE`](@ref), the outer at the top of the band. Returns
+`(ff, Dict(:χ,:b,:k))`, the same shape callers expected from FOOOF; `ff` evaluates the whole fitted
+model, so it is the continuous broadband aperiodic curve (knee included) and can be plotted across
+the band rather than as a bare power law over the high arm alone.
+
+χ is `-last(β)`, the HIGH-frequency arm above the knee, carrying FOOOF's sign (positive) so the
+pipeline's `-χ` gives the usual negative spectral exponent. `first(β)` (the 1-3 Hz arm) is a
+nuisance parameter absorbing the knee, NOT a measured exponent: a third of a decade cannot pin a
+slope, and per channel it scatters over an IQR of ~0.6.
+
+Both knots are held rather than fit because a free knot is not identifiable on these curves. The
+spectrum is smoothly curved rather than two straight segments, so per channel the inner knot goes
+to the ~45 Hz gamma bend in most channels and to the knee in a minority, making `last(β)` a mixture
+of two different bands (IQR 3.0 against 0.19 for a single component). The outer knot matters for a
+different reason: with more than one component `mapple!` windows EVERY component, so a fitted outer
+knot inside the band makes the model fall off through a closing tanh window instead of through its
+exponent, and `last(β)` stops being the slope the curve draws.
+
+NOTE: MAPPLE's `fit!` lives in TimeseriesTools' OptimExt --- needs Optim + ForwardDiff loaded, and a
+version providing `fix_upper_knot`/`fix_inner_knots`, or it NaNs.
+"""
 function mapple_fit(x; kwargs...)
     p = logsample(ustripall(x)[𝑓 = PSD_RANGE[1] .. PSD_RANGE[2]])
     p = p ./ maximum(p) # lift off eps(Float32): raw PSD (~1e-12 V²/Hz) underflows MAPPLE's _safelog10 floor; β is scale-invariant
-    m = fit(MAPPLE, p; components = 1, peaks = 2)  # 2 peaks: absorb both the ~7 Hz and gamma bumps (FOOOF removed up to 8) so the aperiodic slope isn't biased
-    fit!(m, p)
+    m = fit(MAPPLE, p; components = 2, peaks = 2)  # 2 peaks: the ~7 Hz and gamma bumps, so neither biases the arms
+    fit!(m, p; fix_upper_knot = true, fix_inner_knots = [PSD_KNEE])
     β = last(m.params.components.β)
     ff = f -> only(mapple([float(f)], m.params))
     return ff, Dict(:χ => -β, :b => m.params.log_A, :k => 0.0)
