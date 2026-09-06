@@ -14,6 +14,7 @@ using MoreMaps
 using StatsBase: Histogram, merge!
 using Logging, TerminalLoggers
 WRCircuit.@preamble
+include(joinpath(@__DIR__, "..", "..", "scripts", "variability_exponent.jl"))
 set_theme!(fathom(:physics))
 outfile = datadir("demo_run.jld2")
 
@@ -153,21 +154,11 @@ begin # * Fano factor
     τs = logrange(dt * 10 |> ustrip, dt * 10000 |> ustrip, length = 200) # ms
     fano = fano_factor(ustripall(spikes), τs)
 
-    # The MIDDLE component, not the steepest one. A Fano curve is flat (β ≈ 0) out to ~13 ms, rises
-    # through a scaling regime, then flattens off past ~60 ms; `sort!` orders components by
-    # breakpoint, so the middle one IS that scaling regime. `maximum(β)` instead takes whichever
-    # segment happens to be steepest, which is a sub-piece of the rise whenever the fit splits it in
-    # two --- across two runs of this same seeded configuration it swung 0.24 → 0.76, against
-    # 0.15 → 0.35 for the middle component and 0.15 → 0.31 for a fixed 15-60 ms band. (That residual
-    # 2x is the circuit's own run-to-run spread, not the estimator: this exponent needs a seed
-    # ensemble before it can be quoted.)
-    mfano = map(Chart(ProgressLogger(), Threaded()), eachcol(fano)) do x
-        ma = fit(MAPPLE, x; components = 3, peaks = 0)
-        fit!(ma, x)
-        sort!(ma)                                  # order components by breakpoint
-        β = ma.params.components.β
-        return β[(length(β) + 1) ÷ 2]
-    end
+    # The variability exponent of the neuron-MEDIAN curve; see scripts/variability_exponent.jl.
+    # Per-neuron fits are not identifiable on 55 s of spikes (their largest-rise median read 0.78
+    # against 0.28 for the aggregated curve). NOTE plot_demo_run.jl refits this same quantity from
+    # the cached curves, so a stale `mfano` in an old stats file is harmless downstream.
+    mfano = variability_exponent(dropdims(median(fano, dims = 2), dims = 2)).β
 end
 
 begin # * Build LFP, membrane potential, and input traces

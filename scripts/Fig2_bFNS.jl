@@ -13,7 +13,7 @@ using DelimitedFiles
 import StatsBase
 import Fathom: crimson, cornflowerblue, cucumber, california # Foresight-era names, unexported by Fathom
 
-set_theme!(Fathom.fathom())
+set_theme!(Fathom.fathom()) # LaTeXStrings render in STIX Two serif by Fathom default
 
 begin # * Options
     inset_log = false  # true: log-log as inset over linear plot; false: log-log as full axis
@@ -54,6 +54,21 @@ begin # * Set up figure
         # Col 1 = space (potential, step-size), Col 2 = time (relaxation, spectrum)
         gi_potential, gi_stepsize, gi_relax, gi_spectrum = 1, 3, 2, 4
     end
+
+    # Group boxes: space terms (α) vs time terms (β). Negative Outside reaches over the
+    # protrusions so titles, panel letters, and axis labels sit inside the box.
+    groupbox(gp, c; fillalpha = 0.05) = Box(
+        gp; color = (c, fillalpha), strokecolor = (c, 0.35), strokewidth = 1.5,
+        cornerradius = 8, alignmode = Outside(-62, -18, -54, -38) # measured: clears ylabels/xlabels and overhanging right ticks
+    )
+    if order_rows
+        groupbox(g_main[1, 1:2], baikal) # space
+        groupbox(g_main[2, 1:2], bermejo; fillalpha = 0.03) # time
+    else
+        groupbox(g_main[1:2, 1], baikal)
+        groupbox(g_main[1:2, 2], bermejo; fillalpha = 0.03)
+    end
+    order_rows ? rowgap!(g_main, 1, 24) : colgap!(g_main, 1, 24) # air between the group boxes
 end
 
 begin # * Panel 1 — Effective potential for unimodal density
@@ -175,9 +190,12 @@ end
 
 begin # * Right column — sample time series: effect of α, β, γ
     ts_colors = [:black, cornflowerblue, crimson, california]
+    # Negative Outside: reach down past the panel rows (into the group boxes' label band)
+    # so the stack fills the column; the top term cancels the first title's folded protrusion
+    g_ts = f[1:2, 3] = GridLayout(; alignmode = Outside(0, 0, -60, -26))
     for (i, (s, c)) in enumerate(zip(ts_windows, configs))
         ax = Axis(
-            f[1:2, 3][i, 1];
+            g_ts[i, 1];
             title = c.label,
             titlesize = 11,
             titlealign = :right
@@ -186,6 +204,7 @@ begin # * Right column — sample time series: effect of α, β, γ
         hidedecorations!(ax)
         hidespines!(ax)
     end
+    rowgap!(g_ts, 28)
 end
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -195,72 +214,94 @@ begin # * Panel e --- mean absolute deviation
     g_sum = f[3, 1:3] = GridLayout()
     ax = Axis(
         g_sum[1, 1]; xlabel = "Time lag (s)", ylabel = "MAD",
-        xscale = log10, yscale = log10, title = "Anomalous\ndiffusion", # two lines: narrow panel
+        xscale = log10, yscale = log10, title = "Superdiffusion", titlealign = :right, # clear the letter
         limits = ((1.0e-4, 1.0), (0.02, 3))
     )
     lines!(ax, τs, mads; label = "Unconfined")
     lines!(ax, τs, gmads; color = cucumber, label = "Unimodal")
-    lines!(
-        ax, τfit, mad_fit;
-        label = "a = $(round(a_exponent, digits = 2))", color = :crimson,
-        linestyle = :dash
+    lines!(ax, τfit, mad_fit; color = :crimson, linestyle = :dash)
+    text!( # fitted exponent beside its line; glow keeps it legible over the curves
+        ax, 0.95, 0.05; text = "a = $(round(a_exponent, digits = 2))",
+        space = :relative, align = (:right, :bottom), color = :crimson,
+        glowcolor = :white, glowwidth = 8
     )
-    l = axislegend(ax; position = :lt)
-    reverselegend!(l)
+    axislegend(ax; position = :lt, patchsize = (10, 10)) # colors mean the same in (e) and (f)
 end
 
 begin # * Panel f --- power spectral density
     ax = Axis(
-        g_sum[1, 2]; title = "Power\nspectrum",
+        g_sum[1, 2]; title = "LRTCs",
         xtickformat = x -> string.(round.(Int, x))
     )
-    plotspectrum!(ax, psd; label = "Unconfined")
-    plotspectrum!(ax, gpsd; color = cucumber, label = "Unimodal")
-    lines!(
-        ax, psd_fit_x, psd_fit_y;
-        color = :red, linewidth = 2, label = "b = $(round(b_exponent, digits = 2))",
-        linestyle = :dash
+    plotspectrum!(ax, psd)
+    plotspectrum!(ax, gpsd; color = cucumber)
+    lines!(ax, psd_fit_x, psd_fit_y; color = :red, linewidth = 2, linestyle = :dash)
+    text!(
+        ax, 0.05, 0.05; text = "b = $(round(b_exponent, digits = 2))",
+        space = :relative, align = (:left, :bottom), color = :red,
+        glowcolor = :white, glowwidth = 8
     )
-    l = axislegend(ax; position = :lb)
-    reverselegend!(l)
     ax.xlabel = "Frequency (Hz)"
     ax.limits = ((1, 1000), (2.0e-6, 1.0e-1))
 end
 
 begin # * Panels g, h --- exponent maps over (α, β) for the flat sampler
-    function exponent_map!(gp, X; levels, colormap, title, clabel)
+    function exponent_map!(gp, X; levels, colormap, title, hidey = false)
+        Label( # styled as an Axis title, above the colorbar
+            gp[1, 1], title; font = :bold, tellwidth = false, # don't let the title set the column width
+            fontsize = Fathom.fathomfontsize() * 1.25, padding = (0, 0, 2, 0)
+        )
         ax = Axis(
-            gp[1, 1]; xlabel = "α", ylabel = "β", title,
+            gp[3, 1]; xlabel = "α", ylabel = "β",
             xgridvisible = false, ygridvisible = false, backgroundcolor = :gray88,
             limits = ((1.2, 2.0), (0.2, 1.0)), xticks = [1.2, 1.6, 2.0]
         )
+        hidey && hideydecorations!(ax; grid = false) # shares (g)'s β axis
         p = contourf!(ax, X; levels, colormap, extendhigh = :auto, extendlow = :auto)
         contour!(ax, ma; color = :black, levels = [0.5], linestyle = :dash) # a = 1/2 boundary
         scatter!( # the working-regime point shared by the whole figure
             ax, [prms.α], [prms.β]; color = cucumber,
             markersize = 10, strokecolor = :white, strokewidth = 1
         )
-        Colorbar(gp[1, 2], p; width = 8, ticks = WilkinsonTicks(3))
-        Label(gp[1, 2, Top()], clabel, font = :regular)
+        Colorbar(
+            gp[2, 1], p; vertical = false, height = 8, flipaxis = true,
+            ticks = WilkinsonTicks(3), ticklabelsize = 9
+        )
+        rowgap!(Makie.content(gp), 5) # title / colorbar / map sit tight
         return ax
     end
-    exponent_map!(
+    axg = exponent_map!(
         g_sum[1, 3], ma; levels = range(0.25, 0.75, length = 10),
-        colormap = darksunset, title = "Diffusion\nexponent", clabel = "a"
+        colormap = darksunset, title = "Diffusion exponent"
     )
-    exponent_map!(
+    axh = exponent_map!(
         g_sum[1, 4], ms; levels = range(-2.0, -1.0, length = 10),
-        colormap = lightsunset, title = "Spectral\nexponent", clabel = "b"
+        colormap = lightsunset, title = "Spectral exponent", hidey = true
     )
+    linkyaxes!(axg, axh)
+    colsize!(g_sum, 3, Auto(1.18)) # map columns wide enough for their full-size titles
+    colsize!(g_sum, 4, Auto(1.18))
+    colgap!(g_sum, 10)
+end
+
+begin # * Equation banner --- eq:bifractional_neural_sampling, one-line form
+    # Placed after all panels: `f[0, ...]` prepends a row and shifts existing rows down,
+    # so any later `f[row, ...]` index would otherwise be off by one.
+    eq = L"{}^{C}D_t^{\beta}\, x = -\eta \nabla \tilde{V}_{\alpha} + \gamma p + \eta^{1/\alpha} \xi_{\alpha,\beta}\,, \quad \frac{dp}{dt} = -\gamma \nabla \tilde{V}_{\alpha}"
+    # MathTeX's bounding box is right-heavy relative to its ink, so a plain centred Label
+    # sits 67 px left of page centre (measured); the left padding compensates 1:1.
+    Label(f[0, 1:3], eq; fontsize = 22, padding = (63, 0, 12, 2))
 end
 
 begin # * Save figure
-    colsize!(f.layout, 3, Relative(0.2))
+    colsize!(f.layout, 3, Relative(0.28)) # sample-trace column
+    colgap!(f.layout, 2, 30) # air between the group boxes (which reach right) and the traces
     addlabels!(
         [
             gs[1], gs[2], gs[3], gs[4],
             g_sum[1, 1], g_sum[1, 2], g_sum[1, 3], g_sum[1, 4],
-        ], f
+        ], f;
+        dx = [0, 0, 0, 0, -14, 0, 0, 0] # (e): clear its full-width title
     )
     wsave(joinpath(outdir, "$NAME.pdf"), f)
     wsave(joinpath(outdir, "$NAME.svg"), f)

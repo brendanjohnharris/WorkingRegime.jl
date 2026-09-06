@@ -6,16 +6,20 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 # Variability exponent against the cortical hierarchy.
 #
 # The companion to the (a, b) panels of hierarchical_variation.jl, for the third exponent: the
-# VARIABILITY exponent, the log-log slope of a unit's Fano-factor curve over 10^1.5-10^3 ms. Panel a
-# is the per-region scatter at L2/3, panel b the hierarchy correlation (Kendall's 𝜏) at each layer,
-# drawn in the same band-plus-filled/open-marker style.
+# VARIABILITY exponent, the scaling slope of each session's unit-median Fano-factor curve (the
+# unified BIC-selected MAPPLE fit; see `variability_exponent`). Panel a is the per-region scatter
+# at L2/3, panel b the hierarchy correlation (Kendall's 𝜏) at each layer, drawn in the same
+# band-plus-filled/open-marker style.
 #
-# The exponent is RE-DERIVED here from the per-unit Fano curves rather than read from the stored
-# `fano_slopes`, which is unusable: collect_calculations.jl reduces each session's per-unit slopes with
-# a plain `mean`, so a single NaN unit (11% of units carry one) NaNs the whole session and 77% of the
-# session x layer cells are lost. No cell has EVERY unit NaN, so a NaN-aware median across units
-# recovers all of them. Deriving it here also keeps the script self-contained --- it needs only this
-# project's own dependencies, never the WRExperiment environment.
+# The exponent is RE-DERIVED here from the unit Fano curves rather than read from the stored
+# `fano_slopes` (which are per-unit OLS slopes over a fixed 31.6-1000 ms band, session-meaned with a
+# NaN-poisoning bug): each (session, layer) cell's exponent is the unified BIC-selected MAPPLE fit
+# to that cell's unit-MEDIAN curve, then panel b medians across sessions. Aggregating curves before
+# fitting is essential --- per-unit curves lack the SNR for any free-knot fit --- and the fitted
+# knots measure the scaling band instead of assuming it, which is what lets the same estimator serve
+# the circuit (whose regime sits at 10-100 ms, outside the old fixed band) and the mean-field sweep.
+# Deriving it here also keeps the script self-contained --- it needs only this project's own
+# dependencies, never the WRExperiment environment.
 #
 # Resolution note: the reference panel resolves 20 cortical depths, but a unit's layer is the finest
 # binning the stored Fano tables carry (`unitdepths.layer`), so 𝜏 is estimated per LAYER here. Putting
@@ -34,6 +38,7 @@ using MoreMaps
 using Statistics
 using Random
 using DelimitedFiles
+using Optim, ForwardDiff # TimeseriesTools' OptimExt: MAPPLE `fit!` (and its `fix` keyword) need both
 
 set_theme!(fathom())
 
@@ -50,11 +55,8 @@ const layer_codes = 2:5
 const layer_names = Dict(2 => "L2/3", 3 => "L4", 4 => "L5", 5 => "L6")
 const SCATTER_LAYER = 2
 
-# Band the Fano slope is fit over, in ms --- the same band collect_calculations.jl and fano_factors.jl
-# use, so this exponent is the same quantity they plot.
-const FANO_BAND_MS = (10^(1.5), 1.0e3)
-const FANO_BAND = FANO_BAND_MS[1] .. FANO_BAND_MS[2]
 const CURVE_WINDOW = 1.0 .. 1.0e3      # timescales drawn in the curve panel
+const MIN_UNITS = 5                    # fewest unit curves for a (session, layer) median to be fit
 
 const PTHR = 1.0e-2      # matches WRExperiment.PTHR; p-values below are BH-adjusted across layers
 const NBOOT = 10_000
@@ -68,39 +70,29 @@ const inpath = projectdir("WRExperiment", "data", "WRExperiment.jld2")
 # Derive the variability exponent per (structure, session, layer)
 # ──────────────────────────────────────────────────────────────────────────────
 
-"Log-log slope of one unit's Fano-factor curve over `FANO_BAND`; `NaN` if the curve is missing."
-function fano_slope(fano)
-    (fano isa Number) && isnan(fano) && return NaN
-    y = log10.(fano[FANO_BAND])
-    t = log10.(times(y))
-    return last(hcat(ones(length(t)), t) \ y)
-end
+# `variability_exponent` is shared with the circuit and sweep pipelines; see
+# scripts/variability_exponent.jl. Here it is fit to each (session, layer) cell's unit-MEDIAN curve,
+# with a per-refine time cap so a rare ill-conditioned median curve cannot stall the sweep.
+include(joinpath(@__DIR__, "..", "variability_exponent.jl"))
+session_exponent(t, fano) = variability_exponent(t, fano; time_limit = 20.0)
 
 """
-    nanmean(v)
+    session_curve(df, layer) -> (t, fano) | nothing
 
-The reduction across a session's units: `mean` over the units that produced a slope. Matches
-collect_calculations.jl's `mean` over `Unit` now that it drops the NaN units first, so this figure and
-the stored `fano_slopes` compute the same quantity. `NaN` only if every unit failed (which happens
-for no cell in this dataset).
+Median Fano-factor curve across one session's units at `layer`. A unit with no curve is stored as
+a scalar `NaN` rather than a vector, so those are dropped by type before the median (the same
+guard collect_calculations.jl uses for its VISp curve); sessions with fewer than [`MIN_UNITS`](@ref)
+curves are dropped rather than fit through a barely-averaged median.
 """
-nanmean(v) = (w = filter(!isnan, v); isempty(w) ? NaN : mean(w))
-
-"""
-    session_curve(df) -> (t, fano) | nothing
-
-Median Fano-factor curve across one session's units at [`SCATTER_LAYER`](@ref). A unit with no curve
-is stored as a scalar `NaN` rather than a vector, so those are dropped by type before the median ---
-the same guard collect_calculations.jl uses for its VISp curve, and the reason the curve pipeline
-there is sound while the slope pipeline is not.
-"""
-function session_curve(df)
-    u = subset(df, :layer => ByRow(==(SCATTER_LAYER)))
+function session_curve(df, layer)
+    u = subset(df, :layer => ByRow(==(layer)))
     curves = [c for c in u.fano_factor if c isa AbstractVector]
-    isempty(curves) && return nothing
+    length(curves) < MIN_UNITS && return nothing
     n = length(first(curves))
     all(c -> length(c) == n, curves) || return nothing   # off-grid session; drop rather than misalign
-    return collect(times(first(curves))), vec(median(reduce(hcat, collect.(curves)); dims = 2))
+    M = reduce(hcat, collect.(curves))
+    med = [ (w = filter(!isnan, view(M, i, :)); isempty(w) ? NaN : median(w)) for i in 1:n ]
+    return collect(times(first(curves))), med # NaN-safe per lag: units carry scattered NaN lags
 end
 
 """
@@ -114,16 +106,29 @@ function derive_exponents(_)
     @info "Loading unit-level Fano curves from $inpath (this is the slow step)"
     unitdepths = jldopen(f -> f["fano_data"], inpath, "r"; typemap = toolsarray_typemap)[stim]["unitdepths"]
 
-    # One (session, structure) task per stored table; each returns that session's per-layer exponents.
+    # One (session, structure) task per stored table; each returns that session's per-layer exponents
+    # (one fit per layer's unit-median curve) and its fitted band at the scatter layer.
     tasks = [(si, df) for si in eachindex(structures) for df in unitdepths[si]]
-    @info "Fitting Fano slopes over $(length(tasks)) (structure, session) tables"
+    @info "Fitting unit-median Fano curves over $(length(tasks)) (structure, session) tables"
+    nofit = VARIABILITY_NOFIT
     rows = map(Chart(LogLogger(), Threaded()), tasks) do (si, df)
         sid = only(unique(df.ecephys_session_id))
-        vals = map(layer_codes) do l
-            u = subset(df, :layer => ByRow(==(l)))
-            isempty(u) ? NaN : nanmean(fano_slope.(u.fano_factor))
+        fits = map(layer_codes) do l
+            c = session_curve(df, l)
+            isnothing(c) && return nofit
+            try
+                session_exponent(c...)
+            catch
+                nofit
+            end
         end
-        return (; structure = structures[si], session = sid, vals, curve = session_curve(df))
+        vals = [fit.β for fit in fits]
+        band = (fits[findfirst(==(SCATTER_LAYER), layer_codes)].lo,
+            fits[findfirst(==(SCATTER_LAYER), layer_codes)].hi)
+        println("[fit] $(structures[si]) $sid: ", join(round.(vals; digits = 2), " "))
+        flush(stdout) # stderr/logger output is buffered when redirected; this is the live signal
+        return (; structure = structures[si], session = sid, vals, band,
+            curve = session_curve(df, SCATTER_LAYER))
     end
 
     # Per layer: keep the sessions every structure recorded, then lay them out (session × structure).
@@ -152,19 +157,28 @@ function derive_exponents(_)
         n = count(r -> r.structure == s && r.curve !== nothing, rows)
         @info "$s: median Fano curve over $n sessions"
     end
+    # Median fitted scaling band at the scatter layer, for panel a's shading: the estimator now
+    # measures its band per session, so the figure shows where those bands typically sit.
+    los = filter(isfinite, [r.band[1] for r in rows])
+    his = filter(isfinite, [r.band[2] for r in rows])
     return Dict(
         "exponents" => exponents, "sessions" => sessions,
         "curves" => curves, "curve_t" => curve_t,
+        "band" => (median(los), median(his)),
     )
 end
 
+# The estimator goes in the FILENAME, not just the config: `filename` is fixed, so a config-only
+# tag would silently serve the previous estimator's cache after the fit changes.
+const ESTIMATOR = "floor-bic"
 data, datapath = produce_or_load(
-    derive_exponents, Dict("stim" => stim, "band" => "1.5-3"), datadir(NAME);
-    filename = "variability_exponents", tag = true
+    derive_exponents, Dict("stim" => stim, "estimator" => ESTIMATOR), datadir(NAME);
+    filename = "variability_exponents_$ESTIMATOR", tag = true
 )
 exponents = data["exponents"]
 curves = data["curves"]
 curve_t = data["curve_t"]
+fano_band = data["band"]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Statistics --- implemented here so the script needs no dependency beyond this project's own
@@ -316,7 +330,7 @@ begin # * Render
             xscale = log10, yscale = log10,
             title = "$stim, $(layer_names[SCATTER_LAYER])"
         )
-        vspan!(ax, FANO_BAND_MS...; color = (:gray, 0.12), strokewidth = 0)   # the band the slope is fit over
+        vspan!(ax, fano_band...; color = (:gray, 0.12), strokewidth = 0)   # median fitted scaling band
         keep = findall(t -> t in CURVE_WINDOW, curve_t)
         for s in structures   # `structures` is already ordered low → high hierarchy
             lines!(ax, curve_t[keep], curves[s][keep]; color = structure_color[s], linewidth = 2, label = s)

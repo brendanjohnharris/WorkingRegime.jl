@@ -75,8 +75,13 @@ function produce_unitdepths(session::AN.AbstractSession)
         ],
         [:peak_channel_id, :probedepth, :streamlinedepth]
     )
-    D = innerjoin(D, unitmetrics, on = :peak_channel_id)
-    D = innerjoin(D, cdf, on = :peak_channel_id => :id)
+    # `makeunique` widens this to the Visual Coding cohort, whose unit-metrics and channel tables
+    # share eleven column names (:structure_acronym, :probe_id, the CCF coordinates, ...) and would
+    # otherwise throw. Visual Behaviour's tables do not overlap, so nothing there is renamed; only
+    # :probedepth, :streamlinedepth, :ecephys_unit_id and :fano_factor are read downstream, and none
+    # of those collide.
+    D = innerjoin(D, unitmetrics, on = :peak_channel_id, makeunique = true)
+    D = innerjoin(D, cdf, on = :peak_channel_id => :id, makeunique = true)
     D.ecephys_session_id .= sessionid
     return D
 end
@@ -104,13 +109,14 @@ knot inside the band makes the model fall off through a closing tanh window inst
 exponent, and `last(β)` stops being the slope the curve draws.
 
 NOTE: MAPPLE's `fit!` lives in TimeseriesTools' OptimExt --- needs Optim + ForwardDiff loaded, and a
-version providing `fix_upper_knot`/`fix_inner_knots`, or it NaNs.
+version providing the `fix` keyword, or it NaNs.
 """
 function mapple_fit(x; kwargs...)
     p = logsample(ustripall(x)[𝑓 = PSD_RANGE[1] .. PSD_RANGE[2]])
     p = p ./ maximum(p) # lift off eps(Float32): raw PSD (~1e-12 V²/Hz) underflows MAPPLE's _safelog10 floor; β is scale-invariant
     m = fit(MAPPLE, p; components = 2, peaks = 2)  # 2 peaks: the ~7 Hz and gamma bumps, so neither biases the arms
-    fit!(m, p; fix_upper_knot = true, fix_inner_knots = [PSD_KNEE])
+    fit!(m, p; fix = ["components[1].log_f_stop" => log10(PSD_KNEE), # knots in ascending order
+                  "components[2].log_f_stop" => log10(maximum(lookup(p, 1)))]) # band top
     β = last(m.params.components.β)
     ff = f -> only(mapple([float(f)], m.params))
     return ff, Dict(:χ => -β, :b => m.params.log_A, :k => 0.0)
@@ -277,6 +283,16 @@ function fano_factor(
     return Timeseries(f, τ_values)
 end
 
+# Relabel a channel axis by depth. `set` would silently REVERSE the data whenever the two lookups
+# run in opposite directions (DimensionalData >= 0.30), and Allen channel ids descend with depth, so
+# it mirrors every per-channel array through the cortex. `swapdims` is `rebuild` + `format`: same
+# parent, freshly formatted lookup. See scripts/checks/lfp_channel_order_check.jl.
+function chan2depth(x, depths)
+    y = DimensionalData.swapdims(x, (nothing, Depth(depths))) # `nothing` keeps dim 1 (𝑓 or 𝑡)
+    @assert parent(y) === parent(x) # fails if anyone puts `set` back
+    return y
+end
+
 function send_madev(
         sessionid, stimulus, structure;
         outpath = DrWatson.datadir("calculations"),
@@ -342,7 +358,7 @@ function send_madev(
             S = powerspectrum(LFP, 0.1; padding = 10000)
             S = S[𝑓(params[:pass][1] * u"Hz" .. params[:pass][2] * u"Hz")]
             depths = AN.getchanneldepths(session, LFP; method = :probe)
-            S = set(S, Chan => Depth(depths))
+            S = chan2depth(S, depths)
 
             # begin
             #     f = Figure()
@@ -379,7 +395,7 @@ function send_madev(
         taus = madev_taus(dt)             # distinct whole-sample lags; see the docstring
         mad = madev(lfp, taus)
         depths = AN.getchanneldepths(session, LFP; method = :probe)
-        mad = set(mad, Chan => Depth(depths))
+        mad = chan2depth(mad, depths)
         # mad_fit = mad[𝑡 = pass[1] .. pass[2]]
 
         # * Mean fit (MAPPLE diffusion exponent, matching the circuit)

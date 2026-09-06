@@ -5,8 +5,8 @@
    version="1.1"
    id="svg1"
    width="407.28717"
-   height="307.41452"
-   viewBox="0 0 407.28717 307.41452"
+   height="268.79025"
+   viewBox="0 0 407.28717 268.79025"
    sodipodi:docname="mean_field_schematic.svg"
    inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
@@ -3345,7 +3345,7 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:zoom="0.89227026"
      inkscape:cx="367.04126"
-     inkscape:cy="170.91234"
+     inkscape:cy="132.8073"
      inkscape:window-width="1920"
      inkscape:window-height="1028"
      inkscape:window-x="2688"
@@ -3356,7 +3356,7 @@
      id="g1"
      inkscape:groupmode="layer"
      inkscape:label="1"
-     transform="translate(-0.22999213,-14.190811)">
+     transform="translate(-0.22999213,-52.815065)">
     <path
        d="M 299.457,123.996 H 102.289 c -1.601,0 -3.125,0.672 -4.199,1.856 L 2.16,231.199 c -3.32,3.649 -0.73,9.504 4.203,9.504 h 226.719 c 1.949,0 3.766,-1 4.805,-2.652 l 66.375,-105.348 c 2.383,-3.781 -0.332,-8.707 -4.805,-8.707"
        style="fill:#e2e2e2;fill-opacity:1;fill-rule:nonzero;stroke:none"
@@ -6172,14 +6172,6 @@
          x="0"
          dx="0 -0.49395001"
          y="0">Average neuron</tspan></text>
-    <text
-       id="text1039"
-       xml:space="preserve"
-       transform="matrix(1.3333333,0,0,1.3333333,5.692,31.663467)"><tspan
-         id="tspan1039"
-         style="font-variant:normal;font-weight:700;font-size:18px;font-family:Arial;writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none"
-         x="0"
-         y="0">Empirical mean field</tspan></text>
     <g
        opacity="0.699997"
        id="g1044">

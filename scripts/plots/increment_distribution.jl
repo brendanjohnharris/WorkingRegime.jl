@@ -56,8 +56,14 @@ function increment_panel!(ax, d; showsurrogate = true)
     return ax
 end
 
-"Excess kurtosis annotation: the per-channel median, the statistic the sweep and main text quote."
-kurtlabel(d) = @sprintf("κ = %.2f", median(d["kurtosis"]))
+"""
+Excess kurtosis annotation. The sweep and main text use the median ACROSS SESSIONS of each session's
+median over its own L2/3 channels (`collect_surrogates.jl`); the flat per-channel median weights
+sessions by channel count and reads higher, which is what made this panel disagree with the text.
+Falls back to the flat vector for caches written before `kurtosis_session` existed.
+"""
+increment_kurtosis(d) = median(haskey(d, "kurtosis_session") ? d["kurtosis_session"] : d["kurtosis"])
+kurtlabel(d) = @sprintf("κ = %.2f", increment_kurtosis(d))
 
 begin # * Render
     fig = OnePanel()
@@ -96,6 +102,7 @@ begin # * Source data --- exactly the three curves drawn, plus the quoted statis
         vcat(
             ["quantity" "value"],
             [
+                "excess_kurtosis_session_median" increment_kurtosis(d)
                 "excess_kurtosis_median" median(d["kurtosis"])
                 "excess_kurtosis_surrogate_median" median(d["kurtosis_surrogate"])
                 "n_channels" d["nchannels"]

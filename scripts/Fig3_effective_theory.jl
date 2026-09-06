@@ -42,7 +42,12 @@ begin # * Render
     gbot = f[2, 1] = GridLayout()
 
     begin # * Panel a --- mean-field schematic
-        ax = Axis(gtop[1, 1]; aspect = DataAspect(), valign = :top) # letterboxes in its tall cell; sit under the panel letter
+        # Outside(-70, ...) reaches through the page margin + letter gutter so the schematic sits
+        # at the page's left edge (it deliberately does NOT align with the bottom row's axis);
+        # the -22 top term cancels the title protrusion Outside would otherwise fold inside.
+        g_schem = gtop[1, 1] = GridLayout(; alignmode = Outside(-70, 0, 0, -22))
+        ax = Axis(g_schem[1, 1]; aspect = DataAspect(), valign = :top, # letterboxes in its tall cell
+            title = "Effective mean field")
         hidedecorations!(ax)
         hidespines!(ax)
         svgimage!(ax, schematic)
@@ -132,24 +137,32 @@ begin # * Render
     begin # * Panel h --- variability exponent phase diagram
         colorrange = (0.0, 0.6)
         ax = Axis(
-            gbot[1, 4]; title = "Variability\nexponent", xlabel = "α", ylabel = "β",
+            gbot[1, 4]; title = "Variability", xlabel = "α", ylabel = "β",
             backgroundcolor = :gray88, limits = ((1.2, 2.0), (0.2, 1.0))
         )
+        # extend both ends, or out-of-range cells are left unfilled and show the axis background,
+        # indistinguishable from the `nan_color` of the silent wedge. `extendlow` matters near
+        # β = 1: the middle β there is genuinely NEGATIVE (the Markovian sampling limit; with
+        # γ > 0 the momentum regularises spiking, so the Fano curve decays past ~200 ms) --- a
+        # sub-Poisson regime marking the upper-β boundary of the working regime, not missing data.
         p = contourf!(
             ax, mcs; colormap = darksunset, nan_color = :lightgray,
-            levels = range(colorrange...; length = 11)
+            levels = range(colorrange...; length = 11), extendhigh = :auto, extendlow = :auto
         )
         Colorbar(gbot[1, 5], p; ticks = WilkinsonTicks(4; k_max = 4, k_min = 3))
         Label(gbot[1, 5, Top()], L"c"; valign = :bottom, halign = :center)
     end
 
-    colsize!(gtop, 1, Relative(0.35))
+    # The schematic is aspect-locked (1.31 wide) and width-limited, so its size is set by this
+    # column while the row leaves height to spare; widening it is what shrinks the gap beneath.
+    colsize!(gtop, 1, Relative(0.44))
     rowsize!(f.layout, 1, Relative(0.6))
     addlabels!(
         [
             gtop[1, 1], g_input[1, 1], g_input[1, 2], g_input[2, 1], g_input[2, 2],
             gbot[1, 1], gbot[1, 3], gbot[1, 4],
-        ], f; fontsize = 16
+        ], f; fontsize = 16,
+        dx = [40, 0, 0, 0, 0, 0, 0, 0] # (a)'s cell reaches off-page (schematic Outside); pull the letter back on, short of the title
     )
     display(f)
 end

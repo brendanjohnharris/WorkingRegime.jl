@@ -78,18 +78,25 @@ begin # * Pooled L2/3 increment distribution against its FT surrogate null (Fig 
     # directly comparable to a standard Gaussian. One FT surrogate per channel is histogrammed
     # alongside: phase randomisation leaves Gaussian increments, so the surrogate curve gives the null
     # empirically as well as analytically. Serial --- Allen access goes through PythonCall.
+    #
+    # DUPLICATE OF `WRExperiment/scripts/increment_histograms.jl`, which writes this same cache
+    # standalone. `produce_or_load` fires only when the file is absent, so whichever path runs first
+    # wins; the two must stay in sync (better: consolidate them) or deleting the cache silently
+    # reverts the sample and the aggregation behind the Fig 1c annotation.
     increment_histograms, _ = produce_or_load(
         Dict(), DrWatson.datadir(); filename = savepath("increment_histograms")
     ) do _
-        n_sessions = 12                                # enough for a smooth density to ~1e-6
+        n_sessions = nothing                           # nothing = every QC-passing session; an integer takes a draft subset
         structure, stimulus = "VISp", "spontaneous"
         edges = range(-15, 15, length = 601)           # standard deviations, 0.05 SD bins
         sessions = load(
             DrWatson.datadir("session_table.jld2"), "session_table"
-        ).ecephys_session_id[1:n_sessions]
+        ).ecephys_session_id
+        isnothing(n_sessions) || (sessions = sessions[1:min(n_sessions, length(sessions))])
 
         counts, counts_surr = zeros(Int, length(edges) - 1), zeros(Int, length(edges) - 1)
-        kurt, kurt_surr, nchan = Float64[], Float64[], 0
+        kurt, kurt_surr, nchan = Float64[], Float64[], 0   # per channel, pooled across sessions
+        kurt_sess, kurt_sess_surr = Float64[], Float64[]   # per session: median over its L2/3 channels
         for (i, sessionid) in enumerate(sessions)
             @info "[$i/$(length(sessions))] increment histogram, session $sessionid"
             try
@@ -102,15 +109,22 @@ begin # * Pooled L2/3 increment distribution against its FT surrogate null (Fig 
                 lnum = parselayernum.(
                     string.(last(AN.getchannellayers(session, collect(lookup(LFP, AN.Chan)))))
                 )
+                k_this, ks_this = Float64[], Float64[] # this session's per-channel values
                 for j in findall(lnum .== 2)           # L2/3
                     d = diff(@view X[:, j])
                     s = diff(surrogenerator(collect(@view X[:, j]), RandomFourier(), Xoshiro(j))())
                     counts .+= StatsBase.fit(Histogram, d ./ std(d), edges).weights
                     counts_surr .+= StatsBase.fit(Histogram, s ./ std(s), edges).weights
-                    push!(kurt, kurtosis(d))           # excess kurtosis, as the surrogate sweep computes it
-                    push!(kurt_surr, kurtosis(s))
+                    push!(k_this, kurtosis(d))         # excess kurtosis, as the surrogate sweep computes it
+                    push!(ks_this, kurtosis(s))
                     nchan += 1
                 end
+                append!(kurt, k_this)
+                append!(kurt_surr, ks_this)
+                # Session-level value: median over this session's L2/3 channels, matching `collect_surrogates.jl`.
+                kk, kks = filter(!isnan, k_this), filter(!isnan, ks_this)
+                isempty(kk) || push!(kurt_sess, median(kk))
+                isempty(kks) || push!(kurt_sess_surr, median(kks))
             catch e
                 @warn "Skipping $sessionid" e
             end
@@ -122,6 +136,7 @@ begin # * Pooled L2/3 increment distribution against its FT surrogate null (Fig 
             "density" => density(counts), "density_surrogate" => density(counts_surr),
             "counts" => counts, "counts_surrogate" => counts_surr,
             "kurtosis" => kurt, "kurtosis_surrogate" => kurt_surr,
+            "kurtosis_session" => kurt_sess, "kurtosis_surrogate_session" => kurt_sess_surr,
             "nchannels" => nchan, "sessions" => sessions,
             "structure" => structure, "stimulus" => stimulus
         )

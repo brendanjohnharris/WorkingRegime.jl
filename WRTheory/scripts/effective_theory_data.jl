@@ -12,9 +12,10 @@ WRTheory.@preamble()
 import FractionalNeuralSampling.Samplers: gen_lfsm_fns
 import FFTW
 FFTW.set_num_threads(1) # FFTW's own threads segfault (ip: nil) under `julia -t auto` on cartman; these 1-D FFTs lose nothing
+include(joinpath(@__DIR__, "..", "..", "scripts", "variability_exponent.jl"))
 
-# Produces datadir("Fig4_effective_theory.jld2"), plotted by the top-level
-# scripts/Fig4_effective_theory.jl.
+# Produces datadir("Fig3_effective_theory.jld2"), plotted by the top-level
+# scripts/Fig3_effective_theory.jl.
 
 begin # * Options
     transient = 5000.0 # ms
@@ -85,19 +86,20 @@ begin # * Load mean-field sweep
 end
 
 begin # * MAPPLE Fano-curve fits
+    # `variability_exponent` is shared with the circuit and experiment pipelines; see
+    # scripts/variability_exponent.jl for the model and its rationale. The repeat-median is the
+    # aggregated curve it needs --- per-repeat curves have no SNR for a free-knot fit.
     fann = fanos[η = Near(η), γ = Near(γ)]
+    fann = mapslices(v -> all(isnan, v) ? NaN : nansafe(median)(v), fann, dims = Obs)
+    fann = dropdims(fann, dims = Obs) # aggregate curves FIRST, one fit per cell
     fann = eachslice(fann, dims = setdiff(dims(fann), [dims(fann, 𝑡)]) |> Tuple)
-    cs = map(Chart(ProgressLogger(), Threaded()), fann) do ff
+    mcs = map(Chart(ProgressLogger(), Threaded()), fann) do ff
         try
-            m = fit(MAPPLE, ff; peaks = 0, components = 3)
-            fit!(m, ff)
-            maximum(m.params.components.β) # max slope
+            any(isnan, ff) ? NaN : variability_exponent(ff).β
         catch
             NaN
         end
     end
-    mcs = mapslices(m -> all(isnan, m) ? NaN : nansafe(median)(m), cs, dims = Obs)
-    mcs = dropdims(mcs, dims = Obs)
     mcs = permutedims(mcs, (:α, :β))
 end
 
@@ -112,7 +114,7 @@ end
 
 begin # * Save
     tagsave(
-        datadir("Fig4_effective_theory.jld2"),
+        datadir("Fig3_effective_theory.jld2"),
         Dict(
             "sol" => sol, # neuron (V, w), transient removed, times in s
             "input_sol" => input_sol, # sampler input, transient removed, times in s
@@ -123,5 +125,5 @@ begin # * Save
             "params" => (; α, β, η, γ, transient, tspan, dt, seed),
         )
     )
-    @info "wrote" datadir("Fig4_effective_theory.jld2")
+    @info "wrote" datadir("Fig3_effective_theory.jld2")
 end

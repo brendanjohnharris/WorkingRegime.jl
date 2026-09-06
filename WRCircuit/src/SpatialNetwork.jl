@@ -34,7 +34,7 @@ function build_spatial(;
         rho = 20000, dx = 0.5, gamma = 4,
         sigma_ee = 0.06, sigma_ei = 0.07, sigma_ie = 0.14, sigma_ii = 0.14,
         K_ee = 260, K_ei = 340, K_ie = 225, K_ii = 290,
-        delta = 4.0, J_ee = 0.00105, J_ei = 0.00145, nu = 10.0, n_ext = 100,
+        delta = 3.75, J_ee = 0.00105, J_ei = 0.00145, nu = 10.0, n_ext = 100,
         tau_r_e = 1.0, tau_r_i = 2.0, tau_d_e = 5.0, tau_d_i = 4.5,
         V_rev_e = 0.0, V_rev_i = -80.0, e_delay = 1.5, i_delay = 1.5,
         Delta_g_K = 0.002, tau_K = 40.0,

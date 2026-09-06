@@ -117,10 +117,25 @@ begin # * Load precomputed statistics (computed in scripts/demo_run.jl)
     dI_hist = load(statsfile, "dI_hist")   # precomputed |ΔI| step-size density
 end
 
+# The variability exponent, shared with the sweep and experiment pipelines; see
+# scripts/variability_exponent.jl. Fit to the neuron-MEDIAN curve: per-neuron curves (55 s of
+# spikes) have no SNR for a free-knot fit, and their largest-rise median reads 0.78 against 0.28
+# for the aggregated curve.
+include(joinpath(@__DIR__, "..", "..", "scripts", "variability_exponent.jl"))
+
+begin # * Fano exponent from the neuron-median curve, with a split-half reliability check
+    @info "Fitting neuron-median Fano curve (unified estimator)"
+    fano_median = dropdims(median(fano, dims = 2), dims = 2)
+    fano_fit = variability_exponent(fano_median)
+    fano_split = map((1:2:size(fano, 2), 2:2:size(fano, 2))) do js # odd/even neuron halves
+        variability_exponent(dropdims(median(fano[:, js], dims = 2), dims = 2)).β
+    end
+end
+
 begin # * Fano factor statistics
     open(plotdir("critical_demo", "fano_statistics.txt"), "w") do f
-        stat = TimeseriesTools.bootstrapmedian(mfano)
-        write(f, "$(stat)\n")
+        write(f, "unified (BIC-selected fit to neuron-median curve): $(fano_fit)\n")
+        write(f, "split-half β (odd/even neurons): $(fano_split), Δ = $(abs(-(fano_split...)))\n")
     end
 end
 
@@ -292,11 +307,8 @@ begin # * Save pre-computed curves for combined plotting
         x.m.params.components.β |> last
     end
 
-    # Fano factor (median across neurons)
-    fano_median = median(fano, dims = 2)
-    fano_median = dropdims(fano_median, dims = 2)
-    fano_exponent = median(mfano)
-    fano_exponents = collect(mfano)
+    # Fano factor (median across neurons; curve and fit computed above)
+    fano_exponent = fano_fit.β
 
     circuit_curves = (;
         mad = (;
@@ -319,7 +331,10 @@ begin # * Save pre-computed curves for combined plotting
             t = collect(lookup(fano_median, 𝑡)),
             mu = collect(fano_median),
             exponent = fano_exponent,
-            exponents = fano_exponents,
+            band = (fano_fit.lo, fano_fit.hi), # ms, the fit's measured scaling regime
+            ncomponents = fano_fit.ncomponents, # 3 = a segment above the band, 2 = none
+            censored = fano_fit.censored, # true = the band's top is the window end, not a knot
+            split = fano_split, # odd/even neuron-half βs
         ),
     )
 

@@ -6,11 +6,15 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 using DrWatson
 @quickactivate "WorkingRegime"
 using JLD2
+import JSON
+import Colors
+using Rsvg # activates FathomRsvgExt, so `svgimage!` draws true vector graphics
 using TimeseriesTools
 using CairoMakie
 using Fathom
 using Statistics
 using Random
+import StatsBase: corkendall
 using DelimitedFiles
 
 set_theme!(fathom())
@@ -307,10 +311,11 @@ end
 
 const points_l23 = compute_points(2)   # L2/3
 
-# Variability exponent c (log-log Fano slope over 10^1.5-10^3 ms), derived and cached by
-# scripts/plots/variability_variation.jl: `exponents[layer]` is a (SessionID × Structure) matrix in
-# `structures` order, so c bootstraps over sessions exactly as a and b do. Read rather than refit ---
-# the fit needs the unit-level Fano tables, which are slow to load.
+# Variability exponent c (the unified BIC-selected MAPPLE fit to each session's unit-median Fano
+# curve; see variability_exponent in scripts/plots/variability_variation.jl, which derives and
+# caches it): `exponents[layer]` is a (SessionID × Structure) matrix in `structures` order, so c
+# bootstraps over sessions exactly as a and b do. Read rather than refit --- the fit needs the
+# unit-level Fano tables, which are slow to load.
 const variability_path = datadir("variability_variation", "variability_exponents.jld2")
 const c_exponents = if isfile(variability_path)
     jldopen(f -> f["exponents"], variability_path, "r")
@@ -332,7 +337,9 @@ const region_colors = cgrad(binarysunset, length(structures); categorical = true
 const structure_color = Dict(s => region_colors[i] for (i, s) in enumerate(structures))
 const HEATMAP = sunrise
 const δlab = "δ  (I:E ratio)"
-const gklab = "Δg_K  (mS/cm²)"
+# µS, not mS/cm²: the model is a point neuron, `C dV/dt = -gL(V - VL) - gK(V - VK) + I` with V in mV
+# and I in nA, so conductances are nA/mV = µS (C = 0.25 nF, gL = 0.0167 µS give τm = 15 ms).
+const gklab = "Δg_K  (µS)"
 
 const ARROWS = SHOW_CIRCUIT_ARROWS ? (
         ("δ", δ_dir, qinghai),
@@ -419,10 +426,74 @@ end
 
 f = FourPanel()
 
-# One sub-grid per panel; each holds [axis | colorbar] in its own columns. Row-major:
-# gs[1] = L2/3 (a, b); gs[2] = hierarchy τ vs depth (a and b together);
-# gs[3,4] = circuit a, b against δ.
-gs = subdivide(f, 2, 2)
+# Top row: [cortex map | (a, b) scatter | hierarchy τ] in one nested grid; bottom row keeps the
+# root cells. `gs` preserves the panel order the rest of the script indexes:
+# gs[1] = L2/3 (a, b); gs[2] = hierarchy τ vs depth; gs[3,4] = circuit a, b against δ.
+# The bottom row's colorbar labels protrude 64 px right of the root content area, so a plainly
+# nested top grid ends 64 px short of the figure's drawn edge. The negative right Outside reaches
+# over that band; the other terms cancel this grid's own protrusions, which Outside folds inside
+# (measured via layouttree: left 26 = panel letter, bottom 52 = xlabels, top 31 = titles+letters).
+gtop = f[1, 1:2] = GridLayout(; alignmode = Outside(-51, -60, 0, 0))
+# The map column has no x-label, so the band (b) and (c) reserve for theirs is dead space here:
+# reach down into it. The top term cancels the map title's protrusion, which Outside folds inside.
+g_cortex = gtop[1, 1] = GridLayout(; alignmode = Outside(0, 0, -44, -20))
+gs = [gtop[1, 2], gtop[1, 3], f[2, 1], f[2, 2]]
+
+begin # * Top left — the visual cortical areas, coloured by hierarchy position
+    # Geometry from SpatiotemporalMotifs.jl: the svg is embedded as vector art (its dense area
+    # paths tessellate badly through `poly!`), recoloured in place to this figure's hierarchy
+    # palette; the json supplies the label centroids.
+    svg = read(datadir("visual_cortex.svg"), String)
+    svg = replace(
+        svg, r"<path\b[^>]*>" => function (tag)
+            m = match(r"id=\"(VIS\w+)\"", tag) # fill paths; lowercase ids are the outlines
+            isnothing(m) && return tag
+            i = findfirst(==(m[1]), structures)
+            isnothing(i) && return tag
+            hexcol = "#" * Colors.hex(Colors.RGB(region_colors[i]))
+            tag = replace(tag, r" opacity=\"[^\"]*\"" => " opacity=\"1\"") # SM draws them washed at 0.42
+            return replace(tag, r"fill=\"[^\"]*\"" => "fill=\"$hexcol\"")
+        end
+    )
+    W, H = Fathom.svgsize(svg)
+
+    ax_map = Axis(g_cortex[1, 1]; aspect = DataAspect(), title = "Visual cortex",
+                  halign = :left) # letterboxes in its cell; hug the page edge
+    hidedecorations!(ax_map)
+    hidespines!(ax_map)
+    svgimage!(ax_map, svg)
+
+    cortex = JSON.parsefile(datadir("visual_cortex.json")) # image coordinates, y down
+    # The svg's areas overlap (VISp paints over its neighbours' centroids), so the small/hidden
+    # areas get hand-placed anchors on their visible parts; the rest use their path centroid.
+    label_pos = Dict("VISpm" => (232.0, 120.0), "VISam" => (205.0, 45.0), "VISal" => (28.0, 78.0))
+    for s in structures # white with a dark halo: readable over any fill, and across boundaries
+        pts = cortex["fill"][s]
+        cx, cy = get(label_pos, s, (mean(first.(pts)), mean(last.(pts))))
+        text!(
+            ax_map, Point2f(cx, H - cy); text = s, # y flipped: svg draws y-up
+            align = (s == "VISpm" ? :right : :center, :center),
+            fontsize = 10, color = :white, glowcolor = chernoe, glowwidth = 6
+        )
+    end
+    # Horizontal hierarchy scale beneath the map. The in-map labels name the areas, so the bar
+    # carries only the ordering; it colour-keys the scatter panel too.
+    Colorbar(
+        g_cortex[2, 1]; colormap = region_colors, limits = (0, length(structures)),
+        ticksvisible = false, ticklabelsvisible = false, vertical = false, height = 10
+    )
+    ax_key = Axis(g_cortex[3, 1]; height = 14, limits = ((0, 1), (0, 1))) # Lower ⟶ Higher, under the bar
+    hidedecorations!(ax_key)
+    hidespines!(ax_key)
+    text!(ax_key, 0, 0.5; text = "Lower", align = (:left, :center), fontsize = 12)
+    text!(ax_key, 1, 0.5; text = "Higher", align = (:right, :center), fontsize = 12)
+    arrows2d!(
+        ax_key, [Point2f(0.3, 0.5)], [Vec2f(0.4, 0)];
+        color = chernoe, shaftwidth = 1.5, tipwidth = 8, tiplength = 8
+    )
+    rowgap!(g_cortex, 3)
+    colsize!(gtop, 1, Fixed(185)) # pin the map column; the rest of the row goes to (b) and (c)
+end
 
 begin # * Top left — (a, b) plane at L2/3
     scatterlimits = (
@@ -442,45 +513,65 @@ begin # * Top left — (a, b) plane at L2/3
     plot_hero!(ax_l23, points_l23; axis_ranges = aranges)
 end
 
-begin # * Top right — hierarchy correlation of each exponent across cortical depth
-    # The continuous version of the scatter: rather than sampling one layer, `hierarchicalkendall`
-    # correlates each area's exponent against its hierarchy score at every common depth. Band is the
-    # BCa bootstrap CI; filled markers are significant after BH correction, open markers are not.
-    # `a` and `b` share one axis (both are Kendall's τ on the same scale) so the row stays 2-wide.
-    τ_panels = [("diffusion_hierarchical", "a", mesopelagic)]
-    if haskey(plot_data, "spectral_hierarchical")
-        push!(τ_panels, ("spectral_hierarchical", "b", ianthina))
-    else
-        @warn "No `spectral_hierarchical` in $inpath --- re-run collect_calculations.jl for the b series"
+begin # * Top right — hierarchy correlation of each exponent, by layer
+    # One Kendall 𝜏 per SESSION: rank that session's own areas against their hierarchy scores, then
+    # show the distribution across sessions. Ranking within a session removes between-session
+    # variance, which dominates these exponents (~86% of the total for b), and which the previous
+    # pooled-across-sessions 𝜏 spent most of its pairs on.
+    #
+    # Layers rather than depths: the variability exponent c is only defined per layer --- its unit
+    # Fano curves carry no finer binning --- so this is the finest grid all three exponents share.
+    τ_layers = 2:5
+    τ_series = [("a", region_a, mesopelagic), ("b", region_b, ianthina), ("c", region_c, qinghai)]
+    τ_offsets = Dict("a" => -0.18, "b" => 0.0, "c" => 0.18)
+
+    "Per-session Kendall 𝜏 of one exponent against hierarchy at one layer."
+    function session_taus(regionf, layer_idx)
+        cols = [collect(regionf(s, layer_idx)) for s in structures]
+        any(isempty, cols) && return Float64[]
+        n = minimum(length.(cols))
+        Y = reduce(hcat, [c[1:n] for c in cols])
+        x = [hierarchy_scores[s] for s in structures]
+        ts = Float64[]
+        for i in 1:n
+            y = collect(view(Y, i, :))
+            ok = .!isnan.(y)
+            sum(ok) >= 4 && push!(ts, corkendall(x[ok], y[ok]))
+        end
+        return ts
     end
 
     ax_τ = Axis(
-        gs[2][1, 1]; xlabel = "Kendall's 𝜏", ylabel = "Cortical depth (%)",
-        ytickformat = xs -> string.(round.(Int, 100 .* xs)),
-        title = "Hierarchy correlation", yreversed = true
+        gs[2][1, 1]; xlabel = "Kendall's 𝜏", ylabel = "Cortical layer",
+        yticks = (collect(τ_layers), [layer_names[l] for l in τ_layers]),
+        title = "Hierarchy correlation", yreversed = true,
+        limits = ((-1.08, 1.08), (first(τ_layers) - 0.62, last(τ_layers) + 0.62))
     )
     vlines!(ax_τ, 0; color = :gray, linestyle = :dash, linewidth = 1)
-    for (key, sym, color) in τ_panels
-        d = plot_data[key][stim]
-        τ, 𝑝 = collect(d.μ), collect(d.𝑝)
-        depths = collect(d.unidepths)
-        σ = collect(d.σ)
-        sig = 𝑝 .< PTHR
-
-        band!(
-            ax_τ, Point2f.(first.(σ), depths), Point2f.(last.(σ), depths);
-            color = (color, 0.25)
+    for (sym, regionf, color) in τ_series
+        ms, los, his, ys = Float64[], Float64[], Float64[], Float64[]
+        for l in τ_layers
+            ts = session_taus(regionf, l)
+            length(ts) < 5 && continue
+            m, (lo, hi) = bootstrapmedian(ts)
+            push!(ms, m); push!(los, lo); push!(his, hi); push!(ys, l + τ_offsets[sym])
+            @info "τ $sym $(layer_names[l]): median $(round(m; digits = 3)) " *
+                "[$(round(lo; digits = 3)), $(round(hi; digits = 3))], n = $(length(ts))"
+        end
+        isempty(ms) && continue
+        # Light connector so each exponent reads as a profile down the layers; the marker is the
+        # median and the whisker its bootstrap CI. Filled where that interval clears zero, open
+        # where it does not --- the convention the depth version used for its band.
+        lines!(ax_τ, ms, ys; color = (color, 0.4), linewidth = 1.5)
+        rangebars!(ax_τ, ys, los, his; direction = :x, color, linewidth = 1.5, whiskerwidth = 6)
+        sig = (los .> 0) .| (his .< 0)
+        scatter!(ax_τ, ms[sig], ys[sig]; color, markersize = 10, label = sym)
+        any(.!sig) && scatter!(
+            ax_τ, ms[.!sig], ys[.!sig]; color = :transparent, strokecolor = color,
+            strokewidth = 1, markersize = 10, label = sym
         )
-        scatter!(ax_τ, τ[sig], depths[sig]; color, markersize = 10, label = sym)
-        scatter!(
-            ax_τ, τ[.!sig], depths[.!sig]; color = :transparent,
-            strokecolor = color, strokewidth = 1, markersize = 10
-        )
-        @info "$key: $(count(sig))/$(length(sig)) depths significant at p < $PTHR"
     end
-    axislegend(ax_τ; position = :rb, framevisible = false, merge = true)
-    # Invisible stand-in for the colorbar the other panels carry, so columns share a width.
-    Box(gs[2][1, 2]; visible = false, width = 12)
+    axislegend(ax_τ; position = :rb, framevisible = false, merge = true, patchsize = (10, 10))
 end
 
 "Indices into `gk_dg_lookup` of the Δg_K values the bottom row draws: `nlines` evenly spaced across
@@ -525,16 +616,6 @@ begin # * Bottom row — circuit exponents against δ, one line per Δg_K
     )
 end
 
-# The categorical colorbar on the scatter panel doubles as the region legend: one band per
-# structure, ordered low → high hierarchy, with "Higher"/"Lower" ends.
-const _nreg = length(structures)
-Colorbar(
-    gs[1][1, 2]; colormap = region_colors, limits = (0, _nreg),
-    ticks = ((1:_nreg) .- 0.5, structures), width = 12
-)
-Label(gs[1][1, 2, Top()], "Higher"; fontsize = 12, padding = (0, 0, -6, 0))
-Label(gs[1][1, 2, Bottom()], "Lower"; fontsize = 12, padding = (0, 0, 0, 4))
-
 """
     save_source_data()
 
@@ -545,9 +626,10 @@ displacements ARE kept: they are the panel's quantitative claim and are recovera
 file. Reuses the objects the figure was drawn from, so the files cannot drift from the panels.
 """
 function save_source_data()
-    # a --- the region scatter with its session-bootstrap 95% CIs.
+    # b --- the region scatter with its session-bootstrap 95% CIs. Panel a is the cortex map,
+    # whose geometry is data/visual_cortex.json and whose colours are the hierarchy scores above.
     writedlm(
-        joinpath(outdir, "panelA.tsv"),
+        joinpath(outdir, "panelB.tsv"),
         vcat(
             ["structure" "hierarchy" "a" "a_lo" "a_hi" "b" "b_lo" "b_hi"],
             reduce(
@@ -559,9 +641,9 @@ function save_source_data()
             )
         ), '\t'
     )
-    # a --- the direction arrows: net (Δa, Δb) displacement per knob, plus their shared origin.
+    # b --- the direction arrows: net (Δa, Δb) displacement per knob, plus their shared origin.
     writedlm(
-        joinpath(outdir, "panelA_arrows.tsv"),
+        joinpath(outdir, "panelB_arrows.tsv"),
         vcat(
             ["knob" "origin_a" "origin_b" "da" "db"],
             reduce(
@@ -573,27 +655,26 @@ function save_source_data()
             )
         ), '\t'
     )
-    # b --- Kendall 𝜏 against hierarchy at each depth. Long format: the two exponents are separate
-    # series and need not share a depth grid.
+    # c --- per-session Kendall 𝜏 by layer. Long format: one row per (exponent, layer, session),
+    # so the boxes are reconstructible and the distribution is not reduced to a summary.
     rows = Any[]
-    for (key, sym, _) in τ_panels
-        d = plot_data[key][stim]
-        for (dep, t, s, 𝑝) in zip(collect(d.unidepths), collect(d.μ), collect(d.σ), collect(d.𝑝))
-            push!(rows, permutedims([sym, dep, t, first(s), last(s), 𝑝]))
+    for (sym, regionf, _) in τ_series, l in τ_layers
+        for t in session_taus(regionf, l)
+            push!(rows, permutedims([sym, layer_names[l], t]))
         end
     end
     writedlm(
-        joinpath(outdir, "panelB.tsv"),
-        vcat(["exponent" "depth" "tau" "lo" "hi" "p"], reduce(vcat, rows)), '\t'
+        joinpath(outdir, "panelC.tsv"),
+        vcat(["exponent" "layer" "session_tau"], reduce(vcat, rows)), '\t'
     )
-    # c, d --- the circuit lines: δ against the exponent, one column per Δg_K drawn. `NaN` marks
+    # d, e --- the circuit lines: δ against the exponent, one column per Δg_K drawn. `NaN` marks
     # the grid cells the panel skips. Each panel also gets `_lower`/`_upper` files holding the
     # across-seed 95% CI (see `seed_ci`) on the identical grid, so a band can be reconstructed
     # column-by-column without re-reading the sweep.
     sel = drawn_gks()
     hdr = hcat("delta", permutedims(["Delta_g_K=$(gk_dg_lookup[j])" for j in sel]))
     for (name, grid, ci) in
-        (("panelC", _A_dg_full, _A_dg_ci), ("panelD", _B_dg_full, _B_dg_ci))
+        (("panelD", _A_dg_full, _A_dg_ci), ("panelE", _B_dg_full, _B_dg_ci))
         for (suffix, g) in (("", grid), ("_lower", first(ci)), ("_upper", last(ci)))
             writedlm(
                 joinpath(outdir, "$name$suffix.tsv"),
@@ -724,7 +805,10 @@ function save_surrogate_statistics(layer_idx = 2)
     return @info "Saved statistics to $(joinpath(outdir, "surrogate_statistics.tsv"))"
 end
 
-addlabels!(f)
+# Taller top row: the map is aspect-locked, so its size is set by the row height, and the extra
+# height also squares up (b) and (c), which were landscape at the default even split.
+rowsize!(f.layout, 1, Relative(0.55))
+addlabels!([gtop[1, 1], gtop[1, 2], gtop[1, 3], f[2, 1], f[2, 2]], f)
 display(f)
 outfile = joinpath(outdir, "$NAME.pdf")
 wsave(outfile, f)

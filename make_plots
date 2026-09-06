@@ -2,24 +2,11 @@
 
 # ? Prior to this script, you should have EITHER:
 # ?     1. Downloaded the precomputed plot data, OR:
-# ?     2. Run the following long-running scripts individually:
-# ?            - ./make_experiment
-# ?            - ./make_circuit
-# ?            - ./make_theory
+# ?     2. Run the all the calculation scripts, as described in the README, to generate the plot data.
 
-SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="$(dirname "$(realpath "$0")")"
 
-# * Figure 1
-# ? Experiment
-bash "$PROJECT_DIR/scripts/plots/combined_curves.jl"
-
-# * Figure 2
-bash "$PROJECT_DIR/WRTheory/scripts/fractional_operator_summary.jl"
-
-# * Figure 3
-bash "$PROJECT_DIR/WRTheory/scripts/Circuit/model_summary.jl"
-
-# * Figure 4
-bash "$PROJECT_DIR/WRTheory/scripts/Circuit/input_mean_field.jl" # * b--e
-bash "$PROJECT_DIR/WRTheory/scripts/Circuit/mean_field_sweep.jl" # * f -- h
+bash "$PROJECT_DIR/scripts/Fig1_combined_curves.jl"
+bash "$PROJECT_DIR/scripts/Fig2_bFNS.jl"
+bash "$PROJECT_DIR/scripts/Fig3_effective_theory.jl"
+bash "$PROJECT_DIR/scripts/Fig4_hierarchical_variation.jl"

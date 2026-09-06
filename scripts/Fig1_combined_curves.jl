@@ -127,22 +127,11 @@ lognorm(y, ref) = exp10.(
         (maximum(log10.(ref)) - minimum(log10.(ref)))
 )
 
-# MAPPLE fits to the DISPLAYED (median) curves, replacing the mixed estimators previously read from
-# the calculation outputs (the experiment quoted a median of per-channel fits, the circuit a fit to
-# its own median curve). Settings mirror each side's calculation script --- experiment PSD:
-# `WRExperiment.mapple_fit` (2 peaks over PSD_RANGE = 3-500 Hz); circuit PSD: demo_run.jl
-# `fit_spectrum` (1 peak, 10-1000 Hz); both MADs: `diffusion_line`/`fit_mad` (1 component, 0 peaks,
-# log-weighted over the shared 0-8 ms band) --- except the PSDs get TWO aperiodic components so both
-# frequency regimes can be drawn.
-"2-component MAPPLE fit of a PSD curve, log-sampled over `f_range`. Peak-normalised first: β is
-scale-invariant, and raw Float32-origin densities (~1e-12) underflow MAPPLE's log floor."
-function psd_mapple(f, power; f_range, peaks)
-    s = ToolsArray(power ./ maximum(power), (𝑓(f),))
-    p = logsample(s[𝑓 = f_range])
-    m = fit(MAPPLE, p; components = 2, peaks)
-    fit!(m, p) # sorts components by breakpoint, so `last(betas(m))` is the high-frequency slope
-    return m
-end
+# MAD exponents are re-fit here from the DISPLAYED (median) curves, mirroring each side's
+# calculation script (`diffusion_line`/`fit_mad`: 1 component, 0 peaks, log-weighted over the shared
+# 0-8 ms band). The PSD exponents are NOT re-fit: they are read from the calculation outputs, whose
+# fits hold both MAPPLE knots (`WRExperiment.mapple_fit`). A free-knot refit is not identifiable on
+# these curves --- it returns a rising low-frequency arm against an over-steep high-frequency one.
 
 "1-component, 0-peak MAPPLE fit of a MAD curve over `band` (seconds)."
 function mad_mapple(t, vals; band = 0.0 .. 8.0e-3) # WRExperiment.MAD_BAND == WRCircuit.MAD_BAND_MS/1000
@@ -152,16 +141,11 @@ function mad_mapple(t, vals; band = 0.0 .. 8.0e-3) # WRExperiment.MAD_BAND == WR
     return m
 end
 
-"Each aperiodic component of a fitted MAPPLE as a pure power law over `f` (no peaks, no crossfade),
-with amplitudes chained for continuity at the breakpoints, exactly as `mapple!` evaluates them."
-function component_lines(m, f)
-    βs, bps = betas(m), breakpoints(m)
-    As = [exp10(m.params.log_A)]
-    for j in 2:length(βs)
-        push!(As, As[end] * exp10(bps[j - 1])^(βs[j - 1] - βs[j]))
-    end
-    return [A .* f .^ β for (A, β) in zip(As, βs)]
-end
+# The variability exponent of a (median) Fano curve, `t` in ms. The convention shared by the
+# circuit's `circuit.fano.exponent` and Fig 4's per-session exponents; the drawn experiment median
+# is refit here exactly as the MAD panel refits its displayed curves.
+include(joinpath(@__DIR__, "variability_exponent.jl"))
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Data (everything is read; nothing is computed here)
@@ -267,6 +251,15 @@ function traces_panel!(gl, d)
 end
 
 """
+Excess kurtosis annotated on the panel: the median across sessions of each session's median over its
+own L2/3 channels --- the two-stage aggregation `collect_surrogates.jl` uses, so the number printed
+here is the one the main text quotes. Falls back to the flat per-channel median for caches written
+before `kurtosis_session` existed; that pooled form weights sessions by channel count and reads
+higher, which is what made the panel and the text disagree.
+"""
+increment_kurtosis(d) = median(haskey(d, "kurtosis_session") ? d["kurtosis_session"] : d["kurtosis"])
+
+"""
     increment_panel!(ax, d; showsurrogate = true)
 
 Pooled L2/3 increment density on a log axis against its Gaussian null. A Gaussian is an inverted
@@ -285,7 +278,7 @@ function increment_panel!(ax, d; showsurrogate = true, xlim = 7)
     keep = (y .> 0) .& (abs.(x) .<= xlim)
     lines!(ax, x[keep], y[keep]; color = experiment_color, linewidth = 2, label = "Data")
     text!(
-        ax, 0.04, 0.92; text = @sprintf("κ = %.2f", median(d["kurtosis"])), space = :relative,
+        ax, 0.04, 0.92; text = @sprintf("κ = %.2f", increment_kurtosis(d)), space = :relative,
         align = (:left, :top), fontsize = 11, color = experiment_color
     )
     ylims!(ax, 1.0e-6, 1.5)
@@ -463,37 +456,39 @@ function combined_curves_panels!(gl)
     )
     axislegend(axm; position = :rb, framevisible = false)
 
-    # * PSD. The dashed lines are the two APERIODIC components of each fit, each a straight line in
-    #   log-log extended over the full drawn band (peaks omitted); the quoted exponent is the slope
-    #   of the high-frequency component. Fixed y-limits: the shallow component extrapolated to high
-    #   frequency clips at the frame instead of rescaling the axis.
-    μn = psd.μ ./ maximum(psd.μ)                     # same units as psd_mapple fits in
-    cμn = circuit.psd.mu ./ maximum(circuit.psd.mu)
-    pfit_exp = psd_mapple(psd.f, psd.μ; f_range = 3 .. 500, peaks = 2)
-    pfit_circ = psd_mapple(circuit.psd.f, circuit.psd.mu; f_range = 10 .. 1000, peaks = 1)
+    # * PSD. The dashed lines are the APERIODIC component of each fit, a straight line in log-log
+    #   whose slope is exactly the quoted exponent; only the slope carries information. The
+    #   exponents come from the calculation pipelines (`WRExperiment.mapple_fit`, which holds both
+    #   MAPPLE knots, and demo_run.jl's `fit_spectrum`) rather than being refit here: an
+    #   unconstrained refit is not identifiable on these curves and returns a rising low-frequency
+    #   arm paired with an over-steep high-frequency one (+0.91/-4.08 experiment, +2.6/-5.92
+    #   circuit, against true band slopes of about -0.9 and -2.5).
     axp = Axis(
         gl[1, 2]; xlabel = "Frequency (Hz)", ylabel = "PSD (arb. units)", title = "Power spectrum",
         xscale = log10, yscale = log10,
-        xticks = [3, 10, 30, 100], limits = ((2, 500), (0.5, 30))
+        xticks = [3, 10, 30, 100], limits = ((2, 500), nothing)
     )
     lines!(axp, psd.f, exp10.(normalise(log10.(psd.μ))); color = (experiment_color, 0.8))
     band!(
         axp, psd.f, exp10.(normalise(log10.(psd.σl))), exp10.(normalise(log10.(psd.σh)));
         color = (experiment_color, 0.32)
     )
-    for comp in component_lines(pfit_exp, psd.f)
-        lines!(axp, psd.f, lognorm(comp, μn); color = experiment_color, linestyle = :dash)
-    end
+    lines!(
+        axp, psd.f, 1.25 .* exp10.(normalise(log10.(psd.f .^ psd.spectral_exponent_median)));
+        color = experiment_color, linestyle = :dash
+    )
     lines!(axp, circuit.psd.f, exp10.(normalise(log10.(circuit.psd.mu))) .* 1.35; color = circuit_color)
-    for comp in component_lines(pfit_circ, circuit.psd.f)
-        lines!(axp, circuit.psd.f, lognorm(comp, cμn) .* 1.35; color = circuit_color, linestyle = :dash)
-    end
+    lines!(
+        axp, circuit.psd.fit_f,
+        1.25 .* exp10.(normalise(log10.(circuit.psd.fit_f .^ circuit.psd.exponent)));
+        color = circuit_color, linestyle = :dash
+    )
     text!(
-        axp, 7, 10^0.4; text = "b = $(round(last(betas(pfit_exp)); sigdigits = 3))",
+        axp, 7, 10^0.4; text = "b = $(round(psd.spectral_exponent_median; sigdigits = 3))",
         color = experiment_color, align = (:left, :top)
     )
     text!(
-        axp, 20, 10; text = "b = $(round(last(betas(pfit_circ)); sigdigits = 3))",
+        axp, 20, 10; text = "b = $(round(circuit.psd.exponent; sigdigits = 3))",
         color = circuit_color, align = (:left, :bottom)
     )
 
@@ -504,26 +499,37 @@ function combined_curves_panels!(gl)
     )
     band!(axf, 0.001 .* fano.t_all, fano.sl, fano.su; color = experiment_color, alpha = 0.3)
     lines!(axf, 0.001 .* fano.t_all, fano.mu; color = experiment_color)
-    lines!(
-        axf, 0.001 .* exp10.(fano.fit_t_range) ./ 2,
-        exp10.(fano.mintercept .+ fano.mslope .* fano.fit_t_range);
-        color = experiment_color, linestyle = :dash, linewidth = 3
-    )
+    # Unified refit of the DRAWN experiment median (the stored `fano.mslope` is the legacy
+    # fixed-band OLS); the dashed guide spans the fitted scaling band, slope-β through its centre.
+    ffit_exp = variability_exponent(fano.t_all, fano.mu)
+    let tt = exp10.(range(log10(ffit_exp.lo), log10(min(ffit_exp.hi, 1.0e3)); length = 20)),
+            t0 = exp10((log10(ffit_exp.lo) + log10(min(ffit_exp.hi, 1.0e3))) / 2)
+
+        y0 = fano.mu[argmin(abs.(fano.t_all .- t0))]
+        lines!(
+            axf, 0.001 .* tt ./ 2, y0 .* (tt ./ t0) .^ ffit_exp.β;
+            color = experiment_color, linestyle = :dash, linewidth = 3
+        )
+    end
     lines!(axf, 0.001 .* circuit.fano.t, circuit.fano.mu; color = circuit_color)
-    idxs = 10 .< circuit.fano.t .< 100
+    idxs = circuit.fano.band[1] .< circuit.fano.t .< circuit.fano.band[2] # the fit's measured band
     lines!(
         axf, 0.001 .* circuit.fano.t[idxs] ./ 2, circuit.fano.mu[idxs];
         color = circuit_color, linestyle = :dash
     )
     text!(
-        axf, 0.001 .* 40, 10^0.32; text = "c = $(round(fano.mslope, digits = 2))",
+        axf, 0.001 .* 40, 10^0.32; text = "c = $(round(ffit_exp.β, digits = 2))",
         color = experiment_color, align = (:left, :center)
     )
     text!(
         axf, 0.001 .* 1.2, 1.4; text = "c = $(round(circuit.fano.exponent, digits = 2))",
         color = circuit_color, align = (:left, :center)
     )
-    return (; axm, axp, axf, mfit_exp, mfit_circ, pfit_exp, pfit_circ)
+    return (;
+        axm, axp, axf, mfit_exp, mfit_circ,
+        b_exp = psd.spectral_exponent_median, b_circ = circuit.psd.exponent,
+        c_exp = ffit_exp, c_circ = circuit.fano.exponent,
+    )
 end
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -545,19 +551,19 @@ begin # * Render
         title = "L2/3 increments"
     )
     increment_panel!(ax_incr, incr)
-    colsize!(gtop, 1, Relative(0.24))
-    colsize!(gtop, 2, Relative(0.44))
 
     # Middle: input field + trajectory | traces and densities
     g_field = gmid[1, 1] = GridLayout()
     circuit_field_panel!(g_field)
     g_ctr = gmid[1, 2] = GridLayout()
     ctr = circuit_trace_panels!(g_ctr)
-    colsize!(gmid, 1, Relative(0.36))
+    colsize!(gmid, 1, Relative(0.36)) # the field is aspect-locked; an even split letterboxes it
 
     # Bottom: the combined curves; `cc` carries the MAPPLE fits quoted on the panels
     cc = combined_curves_panels!(gbot)
 
+    # Row heights: the circuit row carries the tallest content (field + its colorbar, and the
+    # three-panel trace stack). The top row's columns stay even, which keeps the brain large.
     rowsize!(f.layout, 1, Relative(0.3))
     rowsize!(f.layout, 2, Relative(0.38))
     addlabels!(
@@ -629,16 +635,19 @@ begin # * Statistics --- the same files plot_demo_run.jl and combined_curves.jl 
                 println(io, "circuit $label exponent: $(sub.exponent)")
             end
         end
-        # The numbers actually printed on the figure: MAPPLE re-fits of the drawn median curves.
+        # The numbers actually printed on the figure. The MAD exponents are MAPPLE re-fits of the
+        # drawn median curves; the PSD exponents are the pipelines' own fixed-knot fits, quoted as
+        # they come (the panel does not refit them).
         println(io, "figure mad a (fit to drawn median): experiment $(only(betas(cc.mfit_exp))), circuit $(only(betas(cc.mfit_circ)))")
-        println(io, "figure psd b (high-f component): experiment $(last(betas(cc.pfit_exp))), circuit $(last(betas(cc.pfit_circ)))")
-        println(io, "figure psd b (low-f component): experiment $(first(betas(cc.pfit_exp))), circuit $(first(betas(cc.pfit_circ)))")
-        println(io, "figure psd breakpoint (Hz): experiment $(exp10(first(breakpoints(cc.pfit_exp)))), circuit $(exp10(first(breakpoints(cc.pfit_circ))))")
+        println(io, "figure psd b: experiment $(cc.b_exp), circuit $(cc.b_circ)")
+        println(io, "figure fano c (unified fit to drawn median): experiment $(cc.c_exp), circuit $(cc.c_circ)")
     end
 
     open(joinpath(outdir, "increment_statistics.txt"), "w") do io
-        println(io, "L2/3 increment excess kurtosis (median over channels): $(median(incr["kurtosis"]))")
-        println(io, "FT surrogate excess kurtosis (median over channels): $(median(incr["kurtosis_surrogate"]))")
+        println(io, "L2/3 increment excess kurtosis (median across sessions of per-session channel medians; QUOTED IN TEXT): $(increment_kurtosis(incr))")
+        println(io, "L2/3 increment excess kurtosis (flat median over channels; shape diagnostic only): $(median(incr["kurtosis"]))")
+        println(io, "FT surrogate excess kurtosis (median across sessions): $(haskey(incr, "kurtosis_surrogate_session") ? median(incr["kurtosis_surrogate_session"]) : median(incr["kurtosis_surrogate"]))")
+        println(io, "FT surrogate excess kurtosis (flat median over channels): $(median(incr["kurtosis_surrogate"]))")
         println(io, "channels: $(incr["nchannels"]), sessions: $(length(incr["sessions"]))")
     end
     @info "Saved statistics to $outdir"
