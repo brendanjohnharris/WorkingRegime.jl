@@ -34,7 +34,7 @@ mkpath(outdir)
 # ──────────────────────────────────────────────────────────────────────────────
 
 "Bootstrap median + 95% CI. Local copy so this script needs no Bootstrap.jl (as combined_curves.jl does)."
-function bootstrapmedian(x; N = 10_000, α = 0.05)
+function percentilebootmedian(x; N = 10_000, α = 0.05)
     x = filter(!isnan, collect(skipmissing(x)))
     isempty(x) && return (NaN, (NaN, NaN))
     rng = Random.MersenneTwister(42)
@@ -144,7 +144,6 @@ end
 # The variability exponent of a (median) Fano curve, `t` in ms. The convention shared by the
 # circuit's `circuit.fano.exponent` and Fig 4's per-session exponents; the drawn experiment median
 # is refit here exactly as the MAD panel refits its displayed curves.
-include(joinpath(@__DIR__, "variability_exponent.jl"))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -499,9 +498,11 @@ function combined_curves_panels!(gl)
     )
     band!(axf, 0.001 .* fano.t_all, fano.sl, fano.su; color = experiment_color, alpha = 0.3)
     lines!(axf, 0.001 .* fano.t_all, fano.mu; color = experiment_color)
-    # Unified refit of the DRAWN experiment median (the stored `fano.mslope` is the legacy
-    # fixed-band OLS); the dashed guide spans the fitted scaling band, slope-β through its centre.
-    ffit_exp = variability_exponent(fano.t_all, fano.mu)
+    # The unified fit of the DRAWN experiment median, cached by collect_calculations.jl (the stored
+    # `fano.mslope` is the legacy fixed-band OLS); the dashed guide spans the fitted scaling band,
+    # slope-β through its centre. Read rather than refit, so this figure and the manuscript cannot
+    # disagree about a multistart-seeded quantity.
+    ffit_exp = fano.cfit
     let tt = exp10.(range(log10(ffit_exp.lo), log10(min(ffit_exp.hi, 1.0e3)); length = 20)),
             t0 = exp10((log10(ffit_exp.lo) + log10(min(ffit_exp.hi, 1.0e3))) / 2)
 
@@ -587,7 +588,7 @@ end
 
 begin # * Statistics --- the same files plot_demo_run.jl and combined_curves.jl wrote, in this figure's folder
     open(joinpath(outdir, "fano_statistics.txt"), "w") do io
-        println(io, bootstrapmedian(collect(cstats["mfano"])))
+        println(io, percentilebootmedian(collect(cstats["mfano"])))
     end
 
     open(joinpath(outdir, "statistics.txt"), "w") do io
@@ -597,14 +598,14 @@ begin # * Statistics --- the same files plot_demo_run.jl and combined_curves.jl 
             println(io, "\n=== Variable: $(v) ===")
             println(io, "-- Spectrum fit --")
             println(
-                io, bootstrapmedian(
+                io, percentilebootmedian(
                     map(x -> last(x.m.params.components.β), getproperty(cstats["spectrum_fits"], v))
                 )
             )
             println(io, "-- MAD fit --")
             println(
                 io,
-                bootstrapmedian(
+                percentilebootmedian(
                     map(getproperty(cstats["mad_fits"], v)) do x
                         x isa Number ? x : first(x.m.params.components.β)
                     end
@@ -615,21 +616,21 @@ begin # * Statistics --- the same files plot_demo_run.jl and combined_curves.jl 
 
     open(joinpath(outdir, "combined_curves_$(STIM).txt"), "w") do io
         mad = plot_data["mad_curves"][STIM]
-        m, (lo, hi) = hasproperty(mad, :slope) ? bootstrapmedian(collect(mad.slope)) :
+        m, (lo, hi) = hasproperty(mad, :slope) ? percentilebootmedian(collect(mad.slope)) :
             (mad.meanslope, (NaN, NaN))
         println(io, "$STIM mad median: $m, CI: ($lo, $hi)")
-        m, (lo, hi) = bootstrapmedian(
+        m, (lo, hi) = percentilebootmedian(
             collect(_select(plot_data["spectral_exponents"][STIM], :Structure => "VISp", :layer => 2))
         )
         println(io, "$STIM spectral median: $m, CI: ($lo, $hi)")
-        m, (lo, hi) = bootstrapmedian(
+        m, (lo, hi) = percentilebootmedian(
             collect(_select(plot_data["fano_slopes"][STIM], :Structure => "VISp", :layer => 2))
         )
         println(io, "$STIM fano median: $m, CI: ($lo, $hi)")
         for (label, sub) in
             (("mad", circuit.mad), ("spectral", circuit.psd), ("fano", circuit.fano))
             if hasproperty(sub, :exponents)
-                m, (lo, hi) = bootstrapmedian(collect(sub.exponents))
+                m, (lo, hi) = percentilebootmedian(collect(sub.exponents))
                 println(io, "circuit $label median: $m, CI: ($lo, $hi)")
             else
                 println(io, "circuit $label exponent: $(sub.exponent)")

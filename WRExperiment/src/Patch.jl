@@ -83,7 +83,24 @@ function produce_unitdepths(session::AN.AbstractSession)
     D = innerjoin(D, unitmetrics, on = :peak_channel_id, makeunique = true)
     D = innerjoin(D, cdf, on = :peak_channel_id => :id, makeunique = true)
     D.ecephys_session_id .= sessionid
+    hasproperty(D, :ecephys_unit_id) || (D.ecephys_unit_id = unitids(D))  # cohort-dependent column
     return D
+end
+
+"""
+    unitids(units)
+
+Unit identifiers from an Allen unit table, whose column name differs by cohort: Visual Behaviour's
+`getunitmetrics` returns `id` and mirrors it into `ecephys_unit_id`
+(`AllenNeuropixelsBase/src/VisualBehavior.jl`), while Visual Coding's returns `unit_id` and neither
+of the others. Resolved rather than assumed; AN probes the same way internally
+(`AllenNeuropixelsBase/src/SpikeBand.jl`).
+"""
+function unitids(units)
+    for k in (:ecephys_unit_id, :unit_id, :id)
+        hasproperty(units, k) && return getproperty(units, k)
+    end
+    throw(ArgumentError("no unit-id column in unit table; have $(names(units))"))
 end
 
 """
@@ -293,6 +310,38 @@ function chan2depth(x, depths)
     return y
 end
 
+"""
+Tolerances tried by [`formatlfp`](@ref), in order. `AN.formatlfp` rectifies the LFP's time axis onto
+a regular grid within `tol` samples; which value succeeds varies by session, and 3 (the pipeline's
+long-standing choice) leaves some Visual Coding sessions on an irregular axis.
+"""
+const LFP_TOLERANCES = (3, 4, 5, 6, 2)
+
+"""
+    formatlfp(session; tols = LFP_TOLERANCES, kwargs...)
+
+`AN.formatlfp` with a tolerance ladder, returning the first result whose time lookup is REGULAR.
+
+A regular axis is not cosmetic: `powerspectrum` and `samplingperiod` dispatch on the lookup being an
+`AbstractRange`, so an irregular one fails with a `MethodError` deep inside the spectrum rather than
+at the load. Sessions differ in which tolerance rectifies them, so the tolerance is searched rather
+than fixed; the ladder starts at the pipeline's historical `tol = 3`, which therefore still wins
+wherever it used to.
+"""
+function formatlfp(session; tols = LFP_TOLERANCES, kwargs...)
+    err = nothing
+    for tol in tols
+        try
+            X = AN.formatlfp(session; tol, kwargs...)
+            TimeseriesTools.samplingperiod(ustripall(X))   # throws unless the axis is regular
+            return X
+        catch e
+            err = e
+        end
+    end
+    throw(err)
+end
+
 function send_madev(
         sessionid, stimulus, structure;
         outpath = DrWatson.datadir("calculations"),
@@ -349,7 +398,7 @@ function send_madev(
             return
         end
 
-        LFP = AN.formatlfp(session; tol = 3, _params...)u"V"
+        LFP = formatlfp(session; _params...)u"V"   # tolerance ladder; see `formatlfp`
 
         LFP = set(LFP, 𝑡 => 𝑡((times(LFP))u"s"))
         channels = lookup(LFP, Chan)
@@ -454,8 +503,8 @@ function send_madev(
             _, epoch = findmax(IntervalSets.width, Is) # Longest epoch
             I = Is[epoch]
 
-            units = units[units.ecephys_unit_id .∈ [keys(spiketimes)], :]
-            unitdepths = unitdepths[unitdepths.ecephys_unit_id .∈ [units.id], :]
+            units = units[unitids(units) .∈ [keys(spiketimes)], :]
+            unitdepths = unitdepths[unitdepths.ecephys_unit_id .∈ [unitids(units)], :]
 
             ffactor = fill(NaN, size(unitdepths, 1)) |> Vector{Any}
             unitdepths.fano_factor = ffactor
@@ -528,6 +577,30 @@ function commondepths(depths)
     return range(lo, hi, length = 20)
 end
 
+"""
+    channellayers(x) -> Vector{Int}
+
+Cortical layer number per channel for a [`send_madev`](@ref) block `x` (its `mad`, which carries the
+`layerinfo` metadata), aligned to the COLUMNS of `x` rather than to depth order. Numbering follows
+[`parselayernum`](@ref): 1 = L1, 2 = L2/3, 3 = L4, 4 = L5, 5 = L6.
+
+The realignment is the point. `chan2depth` relabels columns without moving them, so column `j` is
+still the `j`th channel of the LFP, while `_layerinfo` sorts by probe depth before reading the CCF
+acronyms --- so its names are in a different order from the data unless the channels happened to
+arrive depth-sorted. Getting this wrong silently mirrors every layer assignment, which is a failure
+mode this pipeline has already had once, so the sort is inverted explicitly here and asserted.
+"""
+function channellayers(x)
+    md = DimensionalData.metadata(x)
+    haskey(md, :layerinfo) || throw(ArgumentError("no :layerinfo metadata; not a send_madev block"))
+    names, sorteddepths = md[:layerinfo][1], md[:layerinfo][2]
+    depths = collect(lookup(x, Depth))   # probe depths in COLUMN order
+    length(names) == length(depths) ||
+        throw(ArgumentError("layerinfo has $(length(names)) channels, data has $(length(depths))"))
+    @assert issorted(collect(sorteddepths)) "layerinfo depths are not sorted; _layerinfo changed"
+    return parselayernum.(String.(names))[invperm(sortperm(depths))]
+end
+
 function parselayernum(layername) # SM Utils.parselayernum: leading digits, 0 if none, merge layers 2 and 3
     m = match(r"\d+", layername)
     m = m === nothing ? 0 : parse(Int, m.match)
@@ -570,20 +643,34 @@ function pairedkendall(xy)
     notnan = .!(isnan.(y) .| isnan.(x))
     return corkendall(x[notnan], y[notnan])
 end
-function _hierarchicalkendall(xx, yy; N = 10000, confint = 0.95)
+function _hierarchicalkendall(xx, yy; N = 10000, confint = 0.95, seed = 42)
     b = Bootstrap.bootstrap(pairedkendall, collect(zip(xx, yy)), Bootstrap.BalancedSampling(N))
     μ, σ... = only(Bootstrap.confint(b, Bootstrap.BCaConfInt(confint)))
     nsesh = hasdim(yy, SessionID) ? size(yy, SessionID) : 1
+    rng = MersenneTwister(seed)
     μsur = map(1:N) do _
-        idxs = stack(randperm(size(yy, Structure)) for _ in 1:nsesh)
+        idxs = stack(randperm(rng, size(yy, Structure)) for _ in 1:nsesh)
         idxs = yy isa AbstractMatrix ? idxs' : idxs[:]
         ys = view(yy, idxs)   # a different shuffle per session
         @assert size(xx) == size(ys)
         pairedkendall(collect(zip(xx, ys)))
     end
-    𝑝 = mean(abs.(μ) .< abs.(μsur))   # permutation test
+    # Add-one estimator: a permutation p-value of exactly zero is not a valid quantity, and
+    # the old `mean(abs(μ) .< abs(μsur))` returned one whenever no permutation exceeded it.
+    𝑝 = (1 + count(abs.(μsur) .>= abs(μ))) / (N + 1)
     return μ, σ, 𝑝
 end
+"""
+Pooled ("group-level") Kendall 𝜏: every (hierarchy, exponent) point across sessions goes into one
+correlation per depth.
+
+!!! warning "Superseded"
+    Retired from the figures in favour of [`sessionkendall`](@ref), which correlates within session
+    and so is not attenuated by between-session variance (pooled 𝜏 for the spectral exponent at L2/3
+    is 0.38 against 0.60 within-session). Kept only for the legacy plotting scripts
+    `scripts/plots/madev.jl` and `scripts/plots/hierarchy_tau.jl`, and for the 𝜏 values
+    `collect_calculations.jl` still stores for the latter. Do not use it in new analyses.
+"""
 function hierarchicalkendall(x::AbstractVector{<:Real}, y::AbstractDimArray, ::Val{:group}; kwargs...)
     y = permutedims(y, (Depth, SessionID, Structure))
     xx = repeat(x', size(y, SessionID), 1)
@@ -594,6 +681,16 @@ function hierarchicalkendall(x::AbstractVector{<:Real}, y::AbstractDimArray, ::V
     𝑝 = set(𝑝, adjust(collect(𝑝), BenjaminiHochberg()))
     return first.(ms), getindex.(ms, 2), 𝑝
 end
+"""
+Per-session Kendall 𝜏 over a `Depth` x `SessionID` x `Structure` array.
+
+!!! warning "Superseded"
+    Never wired into a figure, and unusable as written: it calls `corkendall` without masking
+    `NaN`, so any missing area returns `NaN`; it requires a `Depth` dimension, while both published
+    panels are indexed by layer; it applies no minimum-coverage guard; and its `SignedRankTest`
+    compares the observed 𝜏 against a *single* random permutation per session rather than against a
+    null distribution. Use [`sessionkendall`](@ref).
+"""
 function hierarchicalkendall(x::AbstractVector{<:Real}, y::AbstractDimArray, ::Val{:individual})
     y = permutedims(y, (Depth, SessionID, Structure))
     ms = asyncmap(eachslice(y, dims = Depth)) do yy
@@ -616,6 +713,16 @@ function hierarchicalkendall(x::AbstractVector{<:Real}, y::AbstractDimArray, ::V
     𝑝 = set(𝑝, adjust(collect(𝑝), BenjaminiHochberg()))
     return first.(ms), getindex.(ms, 2), 𝑝
 end
+"""
+Median per-session Kendall 𝜏 with a bootstrap interval and a rank-sum test against pooled
+surrogates.
+
+!!! warning "Superseded"
+    The test is mis-specified: `MannWhitneyUTest` compares `n_sessions` observations against
+    `N * n_sessions` surrogates as two independent samples, which is not a test of "median 𝜏 = 0"
+    and discards the session pairing the surrogates were built to respect. Kept for
+    `scripts/plots/madev.jl`. Use [`sessionkendall`](@ref).
+"""
 function mediankendallpvalue(x::AbstractVector, Y::AbstractMatrix; N = 10000)
     τ = map(eachslice(collect(Y), dims = 2)) do y
         notnan = .!isnan.(y)

@@ -12,7 +12,6 @@ WRTheory.@preamble()
 import FractionalNeuralSampling.Samplers: gen_lfsm_fns
 import FFTW
 FFTW.set_num_threads(1) # FFTW's own threads segfault (ip: nil) under `julia -t auto` on cartman; these 1-D FFTs lose nothing
-include(joinpath(@__DIR__, "..", "..", "scripts", "variability_exponent.jl"))
 
 # Produces datadir("Fig3_effective_theory.jld2"), plotted by the top-level
 # scripts/Fig3_effective_theory.jl.
@@ -87,7 +86,7 @@ end
 
 begin # * MAPPLE Fano-curve fits
     # `variability_exponent` is shared with the circuit and experiment pipelines; see
-    # scripts/variability_exponent.jl for the model and its rationale. The repeat-median is the
+    # WRTheory/src/Variability.jl for the model and its rationale. The repeat-median is the
     # aggregated curve it needs --- per-repeat curves have no SNR for a free-knot fit.
     fann = fanos[η = Near(η), γ = Near(γ)]
     fann = mapslices(v -> all(isnan, v) ? NaN : nansafe(median)(v), fann, dims = Obs)

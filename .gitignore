@@ -24,6 +24,8 @@ logs/
 cache/
 tempfig.png
 test/
+# `test/` above ignores scratch dirs at any level; the sessionkendall suite is real:
+!WRExperiment/test/
 scripts/calculations/float32_conversion.jl
 data/old/
 old_data/

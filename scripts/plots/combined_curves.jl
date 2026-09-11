@@ -16,7 +16,7 @@ using Random
 set_theme!(Fathom.fathom())
 
 
-function bootstrapmedian(x; N = 10_000, α = 0.05)
+function percentilebootmedian(x; N = 10_000, α = 0.05)
     x = collect(skipmissing(x))
     x = filter(!isnan, x)
     rng = Random.MersenneTwister(42)
@@ -237,7 +237,7 @@ for stim_str in stimuli_str
     begin
         # MAD: bootstrap CI over per-session slopes (requires mad.slope field)
         if hasproperty(mad, :slope)
-            mad_m, (mad_sl, mad_su) = bootstrapmedian(collect(mad.slope))
+            mad_m, (mad_sl, mad_su) = percentilebootmedian(collect(mad.slope))
             mad_line = "$stim_str mad median: $mad_m, CI: ($mad_sl, $mad_su)"
         else
             mad_line = "$stim_str mad median: $(mad.meanslope), CI: (NA, NA)"
@@ -247,21 +247,21 @@ for stim_str in stimuli_str
         # Spectral: bootstrap CI over sessions at VISp L2/3
         spec = plot_data["spectral_exponents"][stim_str]
         mb = _select(spec, :Structure => "VISp", :layer => 2)
-        sp_m, (sp_sl, sp_su) = bootstrapmedian(collect(mb))
+        sp_m, (sp_sl, sp_su) = percentilebootmedian(collect(mb))
         spec_line = "$stim_str spectral median: $sp_m, CI: ($sp_sl, $sp_su)"
         @info spec_line
 
         # Fano: bootstrap CI over sessions at VISp L2/3 slopes
         fslopes = plot_data["fano_slopes"][stim_str]
         fs = _select(fslopes, :Structure => "VISp", :layer => 2)
-        fa_m, (fa_sl, fa_su) = bootstrapmedian(collect(fs))
+        fa_m, (fa_sl, fa_su) = percentilebootmedian(collect(fs))
         fano_line = "$stim_str fano median: $fa_m, CI: ($fa_sl, $fa_su)"
         @info fano_line
 
         # Circuit: bootstrap CI from per-neuron exponents when available.
         function _circuit_line(label, sub)
             if hasproperty(sub, :exponents)
-                m, (lo, hi) = bootstrapmedian(collect(sub.exponents))
+                m, (lo, hi) = percentilebootmedian(collect(sub.exponents))
                 return "circuit $label median: $m, CI: ($lo, $hi)"
             else
                 return "circuit $label exponent: $(sub.exponent)"

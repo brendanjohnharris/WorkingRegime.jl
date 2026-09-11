@@ -118,10 +118,9 @@ begin # * Load precomputed statistics (computed in scripts/demo_run.jl)
 end
 
 # The variability exponent, shared with the sweep and experiment pipelines; see
-# scripts/variability_exponent.jl. Fit to the neuron-MEDIAN curve: per-neuron curves (55 s of
+# WRCircuit/src/Variability.jl. Fit to the neuron-MEDIAN curve: per-neuron curves (55 s of
 # spikes) have no SNR for a free-knot fit, and their largest-rise median reads 0.78 against 0.28
 # for the aggregated curve.
-include(joinpath(@__DIR__, "..", "..", "scripts", "variability_exponent.jl"))
 
 begin # * Fano exponent from the neuron-median curve, with a split-half reliability check
     @info "Fitting neuron-median Fano curve (unified estimator)"
@@ -343,25 +342,8 @@ begin # * Save pre-computed curves for combined plotting
     @info "Saved circuit curves to $(datadir("circuit_curves.jld2"))"
 end
 
-begin # * Supplementary figure: distribution of input distribution parameters
-    sf = FourPanel()
-    gs = subdivide(sf, 2, 2)
-    map(enumerate([(:α, αs), (:β, βs), (:μ, μs), (:σ, σs)])) do (i, (name, data))
-        m = median(data)
-        ax = Axis(
-            gs[i]; title = "$(name): median=$(round(m, digits = 2))",
-            xlabel = string(name),
-            ylabel = "Density"
-        )
-        ziggurat!(
-            ax, data; bins = 20, normalization = :pdf,
-            color = baikal
-        )
-        vlines!(ax, [m]; color = bermejo, linestyle = :dash)
-    end
-    display(sf)
-    wsave(plotdir("critical_demo", "input_distribution_parameters.pdf"), sf)
-end
+# The across-neuron distributions of αs/βs/μs/σs are drawn by scripts/FigS4_input_parameters.jl,
+# which reads them straight out of demo_run_stats.jld2.
 
 # Render a precomputed density histogram `h` (a `histcounts` ToolsArray: bin centre -> density) in the
 # Fathom `ziggurat` style: filled translucent bars with a step outline over the top. On a log axis pass

@@ -28,8 +28,10 @@ end
 
 plotdir(args...) = projectdir("plots", args...)
 const connector = '&'
-export plotdir, connector
+export plotdir, connector, variability_exponent, variability_model, VARIABILITY_SEED,
+    VARIABILITY_PINS, VARIABILITY_WIDTH, VARIABILITY_NOFIT
 
+include("Variability.jl")
 include("Utils.jl")
 include("Makie.jl")
 include("Circuit.jl")

@@ -14,7 +14,6 @@ using MoreMaps
 using StatsBase: Histogram, merge!
 using Logging, TerminalLoggers
 WRCircuit.@preamble
-include(joinpath(@__DIR__, "..", "..", "scripts", "variability_exponent.jl"))
 set_theme!(fathom(:physics))
 outfile = datadir("demo_run.jld2")
 
@@ -154,7 +153,7 @@ begin # * Fano factor
     τs = logrange(dt * 10 |> ustrip, dt * 10000 |> ustrip, length = 200) # ms
     fano = fano_factor(ustripall(spikes), τs)
 
-    # The variability exponent of the neuron-MEDIAN curve; see scripts/variability_exponent.jl.
+    # The variability exponent of the neuron-MEDIAN curve; see WRCircuit/src/Variability.jl.
     # Per-neuron fits are not identifiable on 55 s of spikes (their largest-rise median read 0.78
     # against 0.28 for the aggregated curve). NOTE plot_demo_run.jl refits this same quantity from
     # the cached curves, so a stale `mfano` in an old stats file is harmless downstream.

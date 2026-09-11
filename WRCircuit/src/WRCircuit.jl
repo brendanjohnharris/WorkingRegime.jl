@@ -5,7 +5,8 @@ using CUDA
 using TerminalLoggers: TerminalLogger
 import Logging
 
-export convert2
+export convert2, variability_exponent, variability_model, VARIABILITY_SEED,
+    VARIABILITY_PINS, VARIABILITY_WIDTH, VARIABILITY_NOFIT
 
 const DEWDROP_BACKEND = Dewdrop.GPU
 
@@ -13,6 +14,7 @@ const DEWDROP_BACKEND = Dewdrop.GPU
 # values, so this is just a typed converter (`convert2(Float32)(x) == convert(Float32, x)`).
 convert2(T::Type) = Base.Fix1(convert, T)
 
+include("Variability.jl")
 include("SpatialNetwork.jl")
 include("ModelInterface.jl")
 include("Utils.jl")

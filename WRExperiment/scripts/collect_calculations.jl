@@ -664,6 +664,13 @@ begin
         mintercept = median(first.(mfanos))
         mslope = median(last.(mfanos))
 
+        # The variability exponent of the drawn median. Fit HERE rather than in Figure 1, so the
+        # figure and the manuscript quote one cached number: the estimator draws its multistart
+        # restarts from the global RNG (hence `VARIABILITY_SEED`), and a quantity refitted at draw
+        # time has no saved value to check against. `mslope` above is the legacy fixed-band OLS and
+        # is kept only for comparison.
+        cfit = variability_exponent(collect(times(mu)), collect(mu))
+
         fano_curves[stim_str] = (;
             t_all = collect(times(mu)),
             mu = collect(mu),
@@ -672,8 +679,9 @@ begin
             fit_t_range = collect(t_range),
             mintercept,
             mslope,
+            cfit,
         )
-        @info "Pre-computed Fano curve for $stim_str: slope = $mslope"
+        @info "Pre-computed Fano curve for $stim_str" mslope beta=cfit.β band=(cfit.lo, cfit.hi)
     end
 
     # * Check fano factors are unique across stimuli

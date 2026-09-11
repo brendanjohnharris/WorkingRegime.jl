@@ -27,6 +27,7 @@ MoreMaps = "d6ea422f-1f55-4be1-bfc3-e7c09aa4d855"
 MultipleTesting = "f8716d33-7c4a-5097-896f-ce0ecbd3ef6b"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 Peaks = "18e31ff7-3703-566c-8e60-38913d67486b"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Preferences = "21216c6a-2e73-6563-6e65-726566657250"
 ProgressLogging = "33c8b6b6-d38a-422a-b730-caa89a2f386c"
 PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
@@ -46,3 +47,9 @@ AllenNeuropixelsBase = {rev = "main", url = "https://www.github.com/brendanjohnh
 AllenNeuropixelsBase = "0.5.0"
 StableDistributions = "1.0.4"
 TimeseriesSurrogates = "2.8.0"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

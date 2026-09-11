@@ -17,6 +17,11 @@ using Random
 import StatsBase: corkendall
 using DelimitedFiles
 
+# The per-session hierarchy correlation, shared verbatim with `WRExperiment` and Figure S1.
+# `include`d rather than imported: WRExperiment is a workspace member, not a dependency of the
+# root project this script activates, so `using WRExperiment` is not available here.
+include(projectdir("WRExperiment", "src", "SessionKendall.jl"))
+
 set_theme!(fathom())
 
 const structures = ["VISp", "VISl", "VISrl", "VISal", "VISpm", "VISam"]
@@ -65,7 +70,7 @@ _select_outer(x, dimname::Symbol, val) = _select(x, dimname => val)
 # Bootstrap median + 95% CI across sessions
 # ──────────────────────────────────────────────────────────────────────────────
 
-function bootstrapmedian(x; N = 10_000, α = 0.05)
+function percentilebootmedian(x; N = 10_000, α = 0.05)
     x = collect(skipmissing(x))
     x = filter(!isnan, x)
     isempty(x) && return (NaN, (NaN, NaN))
@@ -136,7 +141,7 @@ function seed_ci(cells)
             isempty(v) || push!(per, median(v))
         end
         length(per) < 2 && continue
-        _, (l, h) = bootstrapmedian(per)
+        _, (l, h) = percentilebootmedian(per)
         lo[i, j] = l
         hi[i, j] = h
     end
@@ -273,27 +278,29 @@ const β_dir = mean_direction(
 # Per-region (a, b) at a chosen cortical layer — bootstrap median over sessions
 # ──────────────────────────────────────────────────────────────────────────────
 
+# The `_raw` forms keep the SessionID lookup, which `exponent_matrix` needs to align the areas by
+# session identifier. The areas do NOT share a session list --- VISp has 68 sessions against the
+# other five areas' 69 --- so anything that pairs them positionally is silently wrong.
 # coeffs_median: ToolsArray{Structure} of ToolsArray{layer, SessionID}
-function region_a(structure, layer_idx)
+function region_a_raw(structure, layer_idx)
     cm = plot_data["madev_data"][stim]["coeffs_median"]
-    inner = _select_outer(cm, :Structure, structure)
-    return collect(_select(inner, :layer => layer_idx))
+    return _select(_select_outer(cm, :Structure, structure), :layer => layer_idx)
 end
-# spectral_exponents: ToolsArray{Structure, layer, SessionID}
-region_b(s, layer_idx) = collect(
-    _select(
-        plot_data["spectral_exponents"][stim],
-        :Structure => s, :layer => layer_idx
-    )
+# spectral_exponents: ToolsArray{SessionID, Structure, layer}
+region_b_raw(s, layer_idx) = _select(
+    plot_data["spectral_exponents"][stim],
+    :Structure => s, :layer => layer_idx
 )
+region_a(structure, layer_idx) = collect(region_a_raw(structure, layer_idx))
+region_b(s, layer_idx) = collect(region_b_raw(s, layer_idx))
 
 "Per-region (a, b) bootstrap medians + 95% CI at one layer, sorted low → high hierarchy."
 function compute_points(layer_idx)
     pts = filter(
         !isnothing, map(structures) do s
             try
-                am, (alo, ahi) = bootstrapmedian(region_a(s, layer_idx))
-                bm, (blo, bhi) = bootstrapmedian(region_b(s, layer_idx))
+                am, (alo, ahi) = percentilebootmedian(region_a(s, layer_idx))
+                bm, (blo, bhi) = percentilebootmedian(region_b(s, layer_idx))
                 (
                     structure = s, h = hierarchy_scores[s],
                     a = am, a_lo = alo, a_hi = ahi,
@@ -312,15 +319,17 @@ end
 const points_l23 = compute_points(2)   # L2/3
 
 # Variability exponent c (the unified BIC-selected MAPPLE fit to each session's unit-median Fano
-# curve; see variability_exponent in scripts/plots/variability_variation.jl, which derives and
+# curve; see WRExperiment/scripts/variability_variation.jl, which derives and
 # caches it): `exponents[layer]` is a (SessionID × Structure) matrix in `structures` order, so c
 # bootstraps over sessions exactly as a and b do. Read rather than refit --- the fit needs the
 # unit-level Fano tables, which are slow to load.
-const variability_path = datadir("variability_variation", "variability_exponents.jld2")
+const variability_path = projectdir(
+    "WRExperiment", "data", "variability_variation", "variability_exponents.jld2"
+)
 const c_exponents = if isfile(variability_path)
     jldopen(f -> f["exponents"], variability_path, "r")
 else
-    @warn "No $variability_path --- run scripts/plots/variability_variation.jl for the c column"
+    @warn "No $variability_path --- run WRExperiment/scripts/variability_variation.jl for the c column"
     nothing
 end
 
@@ -516,55 +525,93 @@ end
 begin # * Top right — hierarchy correlation of each exponent, by layer
     # One Kendall 𝜏 per SESSION: rank that session's own areas against their hierarchy scores, then
     # show the distribution across sessions. Ranking within a session removes between-session
-    # variance, which dominates these exponents (~86% of the total for b), and which the previous
-    # pooled-across-sessions 𝜏 spent most of its pairs on.
+    # variance, which dominates these exponents --- across the twelve (exponent, layer) cells it is
+    # 22-61% of the total variance and 64-95% of the variance the session and area effects share
+    # (b at L2/3: 38% and 65%) --- and which the previous pooled-across-sessions 𝜏 spent most of its
+    # pairs on. Pooling attenuates accordingly: b at L2/3 gives 0.38 pooled against 0.60 here.
     #
     # Layers rather than depths: the variability exponent c is only defined per layer --- its unit
     # Fano curves carry no finer binning --- so this is the finest grid all three exponents share.
     τ_layers = 2:5
-    τ_series = [("a", region_a, mesopelagic), ("b", region_b, ianthina), ("c", region_c, qinghai)]
+    # Colours match the bFNS arrows in panel b: a ↔ α blue, b ↔ β red. c has no arrow, so it takes glas.
+    τ_series = [("a", baikal), ("b", bermejo), ("c", glas)]
     τ_offsets = Dict("a" => -0.18, "b" => 0.0, "c" => 0.18)
+    τ_hier = [hierarchy_scores[s] for s in structures]
+    const MIN_AREAS = 4      # areas a session must retain before its 𝜏 is used
 
-    "Per-session Kendall 𝜏 of one exponent against hierarchy at one layer."
-    function session_taus(regionf, layer_idx)
-        cols = [collect(regionf(s, layer_idx)) for s in structures]
-        any(isempty, cols) && return Float64[]
-        n = minimum(length.(cols))
-        Y = reduce(hcat, [c[1:n] for c in cols])
-        x = [hierarchy_scores[s] for s in structures]
-        ts = Float64[]
-        for i in 1:n
-            y = collect(view(Y, i, :))
-            ok = .!isnan.(y)
-            sum(ok) >= 4 && push!(ts, corkendall(x[ok], y[ok]))
+    """
+    The `(session × area)` matrix of one exponent at one layer, on the session set the areas share.
+
+    `a` and `b` are stored per area with their own SessionID lookups, so they are aligned by
+    identifier through `sessionmatrix`; `c` is already stored as one `(session × area)` matrix.
+    """
+    function exponent_matrix(sym, layer_idx)
+        if sym == "c"
+            (isnothing(c_exponents) || !haskey(c_exponents, layer_idx)) && return nothing
+            return Float64.(c_exponents[layer_idx])
         end
-        return ts
+        raw = sym == "a" ? region_a_raw : region_b_raw
+        cols = [raw(s, layer_idx) for s in structures]
+        any(isempty, cols) && return nothing
+        return first(sessionmatrix([lookup(c, :SessionID) for c in cols], [collect(c) for c in cols]))
+    end
+
+    # One `sessionkendall` per (exponent, layer) cell, then Benjamini-Hochberg across the 12 cells
+    # this panel draws. The correction belongs here rather than inside the estimator, which cannot
+    # know what family it is part of.
+    τ_cells = NamedTuple[]
+    for (sym, _) in τ_series, l in τ_layers
+        Y = exponent_matrix(sym, l)
+        isnothing(Y) && continue
+        r = sessionkendall(τ_hier, Y; minareas = MIN_AREAS)
+        r.nsessions < 5 && continue
+        push!(τ_cells, (; sym, layer = l, r...))
+    end
+    τ_cells = [(; c..., padj = q) for (c, q) in zip(τ_cells, bhadjust([c.p for c in τ_cells]))]
+    for c in τ_cells
+        @info "τ $(c.sym) $(layer_names[c.layer]): median $(round(c.tau; digits = 3)) " *
+            "[$(round(c.ci[1]; digits = 3)), $(round(c.ci[2]; digits = 3))], " *
+            "mean $(round(c.meantau; digits = 3)), p = $(round(c.p; sigdigits = 2)), " *
+            "p_adj = $(round(c.padj; sigdigits = 2)), n = $(c.nsessions)"
     end
 
     ax_τ = Axis(
         gs[2][1, 1]; xlabel = "Kendall's 𝜏", ylabel = "Cortical layer",
         yticks = (collect(τ_layers), [layer_names[l] for l in τ_layers]),
         title = "Hierarchy correlation", yreversed = true,
+        # The full range of 𝜏, so the per-session strip is not clipped: a six-area session can
+        # reach ±1, and 34 of the 772 drawn values sit beyond ±0.85.
+        xticks = -1:0.5:1,
         limits = ((-1.08, 1.08), (first(τ_layers) - 0.62, last(τ_layers) + 0.62))
     )
+    hlines!(ax_τ, τ_layers[1:(end - 1)] .+ 0.5; color = (:gray, 0.4), linewidth = 0.5) # layer separators
     vlines!(ax_τ, 0; color = :gray, linestyle = :dash, linewidth = 1)
-    for (sym, regionf, color) in τ_series
-        ms, los, his, ys = Float64[], Float64[], Float64[], Float64[]
-        for l in τ_layers
-            ts = session_taus(regionf, l)
-            length(ts) < 5 && continue
-            m, (lo, hi) = bootstrapmedian(ts)
-            push!(ms, m); push!(los, lo); push!(his, hi); push!(ys, l + τ_offsets[sym])
-            @info "τ $sym $(layer_names[l]): median $(round(m; digits = 3)) " *
-                "[$(round(lo; digits = 3)), $(round(hi; digits = 3))], n = $(length(ts))"
+
+    # The per-session 𝜏 behind each median, as a jittered strip under its interval. Six areas put
+    # every session's 𝜏 on a 1/15 grid, so the median lands on a grid point and a bootstrap endpoint
+    # can coincide with it; drawing the sample makes that granularity explicit rather than leaving a
+    # zero-width whisker looking like a typo. Seeded, so the jitter is the same on every rerun.
+    τ_jitter = Random.MersenneTwister(7)
+    for (sym, color) in τ_series
+        cells = [c for c in τ_cells if c.sym == sym]
+        isempty(cells) && continue
+        for c in cells
+            y0 = c.layer + τ_offsets[sym]
+            scatter!(
+                ax_τ, c.taus, y0 .+ (rand(τ_jitter, length(c.taus)) .- 0.5) .* 0.24;
+                color = (color, 0.22), markersize = 3, strokewidth = 0
+            )
         end
-        isempty(ms) && continue
         # Light connector so each exponent reads as a profile down the layers; the marker is the
-        # median and the whisker its bootstrap CI. Filled where that interval clears zero, open
-        # where it does not --- the convention the depth version used for its band.
+        # median and the whisker its percentile bootstrap CI over sessions. Filled where the
+        # BH-adjusted permutation p clears PTHR, open where it does not. The CI is drawn either way:
+        # it describes the median's precision, and is no longer what decides significance.
+        ys = [c.layer + τ_offsets[sym] for c in cells]
+        ms = [c.tau for c in cells]
+        los, his = [c.ci[1] for c in cells], [c.ci[2] for c in cells]
+        sig = [c.padj < PTHR for c in cells]
         lines!(ax_τ, ms, ys; color = (color, 0.4), linewidth = 1.5)
         rangebars!(ax_τ, ys, los, his; direction = :x, color, linewidth = 1.5, whiskerwidth = 6)
-        sig = (los .> 0) .| (his .< 0)
         scatter!(ax_τ, ms[sig], ys[sig]; color, markersize = 10, label = sym)
         any(.!sig) && scatter!(
             ax_τ, ms[.!sig], ys[.!sig]; color = :transparent, strokecolor = color,
@@ -658,14 +705,33 @@ function save_source_data()
     # c --- per-session Kendall 𝜏 by layer. Long format: one row per (exponent, layer, session),
     # so the boxes are reconstructible and the distribution is not reduced to a summary.
     rows = Any[]
-    for (sym, regionf, _) in τ_series, l in τ_layers
-        for t in session_taus(regionf, l)
-            push!(rows, permutedims([sym, layer_names[l], t]))
-        end
+    for c in τ_cells, (t, na) in zip(c.taus, c.nareas)
+        push!(rows, permutedims([c.sym, layer_names[c.layer], t, na]))
     end
     writedlm(
         joinpath(outdir, "panelC.tsv"),
-        vcat(["exponent" "layer" "session_tau"], reduce(vcat, rows)), '\t'
+        vcat(["exponent" "layer" "session_tau" "n_areas"], reduce(vcat, rows)), '\t'
+    )
+    # c --- the summary actually drawn, so the prose has a file to cite. `tau` is the across-session
+    # median and `ci` its percentile bootstrap interval; `p` is the within-session label-permutation
+    # test on the mean 𝜏, `p_adj` its Benjamini-Hochberg value across these 12 cells, and
+    # `significant` the filled/open rule the panel uses (p_adj < PTHR).
+    writedlm(
+        joinpath(outdir, "panelC_stats.tsv"),
+        vcat(
+            ["exponent" "layer" "n_sessions" "tau" "ci_lo" "ci_hi" "mean_tau" "p" "p_adj" "significant"],
+            reduce(
+                vcat,
+                [
+                    permutedims(
+                        [
+                            c.sym, layer_names[c.layer], c.nsessions, c.tau, c.ci[1], c.ci[2],
+                            c.meantau, c.p, c.padj, c.padj < PTHR,
+                        ]
+                    ) for c in τ_cells
+                ]
+            )
+        ), '\t'
     )
     # d, e --- the circuit lines: δ against the exponent, one column per Δg_K drawn. `NaN` marks
     # the grid cells the panel skips. Each panel also gets `_lower`/`_upper` files holding the
@@ -696,13 +762,13 @@ the file cannot disagree with panel a.
 """
 function save_statistics(layer_idx = 2)
     rows = map(points_l23) do p
-        cm, (clo, chi) = bootstrapmedian(region_c(p.structure, layer_idx))
+        cm, (clo, chi) = percentilebootmedian(region_c(p.structure, layer_idx))
         permutedims([p.structure, p.h, p.a, p.a_lo, p.a_hi, p.b, p.b_lo, p.b_hi, cm, clo, chi])
     end
     pool(f) = reduce(vcat, [collect(f(p.structure, layer_idx)) for p in points_l23])
-    am, (alo, ahi) = bootstrapmedian(pool(region_a))
-    bm, (blo, bhi) = bootstrapmedian(pool(region_b))
-    cm, (clo, chi) = bootstrapmedian(pool(region_c))
+    am, (alo, ahi) = percentilebootmedian(pool(region_a))
+    bm, (blo, bhi) = percentilebootmedian(pool(region_b))
+    cm, (clo, chi) = percentilebootmedian(pool(region_c))
     push!(rows, permutedims(["pooled", NaN, am, alo, ahi, bm, blo, bhi, cm, clo, chi]))
     writedlm(
         joinpath(outdir, "statistics.tsv"),

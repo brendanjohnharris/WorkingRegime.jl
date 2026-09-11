@@ -3,44 +3,43 @@
 #=
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-# Variability exponent against the cortical hierarchy.
+# Variability exponent against the cortical hierarchy --- a CALCULATION, not a figure.
 #
-# The companion to the (a, b) panels of hierarchical_variation.jl, for the third exponent: the
-# VARIABILITY exponent, the scaling slope of each session's unit-median Fano-factor curve (the
-# unified BIC-selected MAPPLE fit; see `variability_exponent`). Panel a is the per-region scatter
-# at L2/3, panel b the hierarchy correlation (Kendall's 𝜏) at each layer, drawn in the same
-# band-plus-filled/open-marker style.
+# Derives the third exponent for Figure 4: the VARIABILITY exponent, the scaling slope of each
+# session's unit-median Fano-factor curve (the BIC-selected MAPPLE fit, `variability_exponent` from
+# this package). The result is cached under `datadir(NAME)` and read by
+# `scripts/Fig4_hierarchical_variation.jl`; the standalone figure this script used to draw is gone.
+#
+# The hierarchy statistics below are kept because they are self-checking (see `selfcheck`) and their
+# per-layer 𝜏 is worth having in the log, but nothing downstream reads them --- Figure 4 recomputes
+# 𝜏 from the cached exponents so that a, b and c are correlated identically.
 #
 # The exponent is RE-DERIVED here from the unit Fano curves rather than read from the stored
 # `fano_slopes` (which are per-unit OLS slopes over a fixed 31.6-1000 ms band, session-meaned with a
 # NaN-poisoning bug): each (session, layer) cell's exponent is the unified BIC-selected MAPPLE fit
-# to that cell's unit-MEDIAN curve, then panel b medians across sessions. Aggregating curves before
+# to that cell's unit-MEDIAN curve, and Figure 4 medians across sessions. Aggregating curves before
 # fitting is essential --- per-unit curves lack the SNR for any free-knot fit --- and the fitted
 # knots measure the scaling band instead of assuming it, which is what lets the same estimator serve
 # the circuit (whose regime sits at 10-100 ms, outside the old fixed band) and the mean-field sweep.
-# Deriving it here also keeps the script self-contained --- it needs only this project's own
-# dependencies, never the WRExperiment environment.
+# It lives in WRExperiment (rather than being shared through a script `include`) so that the
+# estimator comes from the package it belongs to; see WRExperiment/src/Variability.jl.
 #
-# Resolution note: the reference panel resolves 20 cortical depths, but a unit's layer is the finest
-# binning the stored Fano tables carry (`unitdepths.layer`), so 𝜏 is estimated per LAYER here. Putting
+# Resolution note: Figure 4 resolves a and b over 20 cortical depths, but a unit's layer is the
+# finest binning the stored Fano tables carry (`unitdepths.layer`), so c is per LAYER only. Putting
 # it on the depth grid would mean choosing a depth-binning scheme for units, which is a modelling
 # decision this script deliberately does not make on its own.
 
 using DrWatson
-@quickactivate "WorkingRegime"
+@quickactivate "WRExperiment"
+import WRExperiment: variability_exponent  # named import: the script defines its own `structures` etc.
 using JLD2
 using DataFrames
 using TimeseriesTools
-using TimeseriesBase
-using CairoMakie
-using Fathom
 using MoreMaps
 using Statistics
 using Random
-using DelimitedFiles
 using Optim, ForwardDiff # TimeseriesTools' OptimExt: MAPPLE `fit!` (and its `fix` keyword) need both
 
-set_theme!(fathom())
 
 const structures = ["VISp", "VISl", "VISrl", "VISal", "VISpm", "VISam"]
 const hierarchy_scores = Dict(
@@ -63,17 +62,15 @@ const NBOOT = 10_000
 const SEED = 42
 
 const NAME = "variability_variation"
-const PATH = plotsdir(NAME)
-const inpath = projectdir("WRExperiment", "data", "WRExperiment.jld2")
+const inpath = datadir("WRExperiment.jld2")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Derive the variability exponent per (structure, session, layer)
 # ──────────────────────────────────────────────────────────────────────────────
 
-# `variability_exponent` is shared with the circuit and sweep pipelines; see
-# scripts/variability_exponent.jl. Here it is fit to each (session, layer) cell's unit-MEDIAN curve,
+# `variability_exponent` is vendored per package; this copy comes from WRExperiment, see
+# WRExperiment/src/Variability.jl. Here it is fit to each (session, layer) cell's unit-MEDIAN curve,
 # with a per-refine time cap so a rare ill-conditioned median curve cannot stall the sweep.
-include(joinpath(@__DIR__, "..", "variability_exponent.jl"))
 session_exponent(t, fano) = variability_exponent(t, fano; time_limit = 20.0)
 
 """
@@ -157,31 +154,36 @@ function derive_exponents(_)
         n = count(r -> r.structure == s && r.curve !== nothing, rows)
         @info "$s: median Fano curve over $n sessions"
     end
-    # Median fitted scaling band at the scatter layer, for panel a's shading: the estimator now
-    # measures its band per session, so the figure shows where those bands typically sit.
+    # Median fitted scaling band across sessions: the estimator measures its band per session
+    # rather than assuming one, so this records where those bands typically sit.
     los = filter(isfinite, [r.band[1] for r in rows])
     his = filter(isfinite, [r.band[2] for r in rows])
     return Dict(
         "exponents" => exponents, "sessions" => sessions,
         "curves" => curves, "curve_t" => curve_t,
         "band" => (median(los), median(his)),
+        "estimator" => ESTIMATOR,
     )
 end
 
-# The estimator goes in the FILENAME, not just the config: `filename` is fixed, so a config-only
-# tag would silently serve the previous estimator's cache after the fit changes.
+# The filename is fixed --- `scripts/Fig4_hierarchical_variation.jl` reads exactly this name --- so
+# DrWatson cannot vary the cache by config, and a changed estimator would otherwise be served
+# silently from the old file. The estimator is therefore recorded IN the result and checked on load.
+# Files predating that key carry no estimator and are accepted: they came from this same fit.
 const ESTIMATOR = "floor-bic"
 data, datapath = produce_or_load(
     derive_exponents, Dict("stim" => stim, "estimator" => ESTIMATOR), datadir(NAME);
-    filename = "variability_exponents_$ESTIMATOR", tag = true
+    filename = "variability_exponents", tag = true
 )
+let cached = get(data, "estimator", nothing)
+    isnothing(cached) || cached == ESTIMATOR ||
+        error("$(datapath) was produced by estimator $(repr(cached)), not $(repr(ESTIMATOR)); \
+               delete it to refit")
+end
 exponents = data["exponents"]
-curves = data["curves"]
-curve_t = data["curve_t"]
-fano_band = data["band"]
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Statistics --- implemented here so the script needs no dependency beyond this project's own
+# Statistics --- hand-rolled and self-checked below
 # ──────────────────────────────────────────────────────────────────────────────
 
 """
@@ -212,7 +214,7 @@ end
 Kendall's 𝜏 between the hierarchy score and the variability exponent, pooling every
 (session, region) pair of one `(SessionID × Structure)` matrix. The interval is a percentile
 bootstrap over those pairs (the reference panel uses a BCa interval via Bootstrap.jl; percentile
-keeps this script dependency-free and matches `bootstrapmedian` elsewhere in these plot scripts).
+keeps this script dependency-free and matches `percentilebootmedian` elsewhere in these plot scripts).
 `p` is a permutation test that reshuffles region labels independently within each session, so it
 preserves each session's spread and destroys only the hierarchy ordering.
 """
@@ -277,7 +279,7 @@ end
 @assert selfcheck()
 
 "Percentile-bootstrap median and 95% interval of one region's exponents across sessions."
-function bootstrapmedian(v; N = NBOOT)
+function percentilebootmedian(v; N = NBOOT)
     w = filter(!isnan, v)
     isempty(w) && return (NaN, (NaN, NaN))
     rng = Random.MersenneTwister(SEED)
@@ -295,134 +297,4 @@ taus = [(; t..., q = q) for (t, q) in zip(taus, adjusted)]
 for t in taus
     @info "$(layer_names[t.layer]): 𝜏 = $(round(t.τ; digits = 3)) " *
         "[$(round(t.σ[1]; digits = 3)), $(round(t.σ[2]; digits = 3))], q = $(round(t.q; sigdigits = 3))"
-end
-
-# Per-region points at the scatter layer, ordered low → high hierarchy.
-const points = let Y = exponents[SCATTER_LAYER]
-    pts = map(enumerate(structures)) do (j, s)
-        m, (lo, hi) = bootstrapmedian(Y[:, j])
-        (; structure = s, h = hierarchy_scores[s], m, lo, hi)
-    end
-    sort(pts; by = p -> p.h)
-end
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Figure
-# ──────────────────────────────────────────────────────────────────────────────
-
-# Region colours keep hierarchical_variation.jl's dark → light hierarchy ordering, but the gradient is
-# truncated before its near-white end (luminance 0.95), which is invisible as a line on the page.
-const region_colors = [
-    get(cgrad(binarysunset), x) for x in range(0, 0.7, length = length(structures))
-]
-const structure_color = Dict(s => region_colors[i] for (i, s) in enumerate(structures))
-const SERIES = ianthina
-
-begin # * Render
-    # Three panels in a row. Fathom has no ThreePanel preset, so this is a plain `Figure` sized as
-    # three OnePanel cells (360 × 270 each) to stay on the theme's proportions.
-    f = Figure(; size = (1080, 270))
-    gs = subdivide(f, 1, 3)
-
-    begin # * a --- the curves the exponent is a slope of, one per region
-        ax = Axis(
-            gs[1][1, 1]; xlabel = "Timescale (ms)", ylabel = "Fano factor",
-            xscale = log10, yscale = log10,
-            title = "$stim, $(layer_names[SCATTER_LAYER])"
-        )
-        vspan!(ax, fano_band...; color = (:gray, 0.12), strokewidth = 0)   # median fitted scaling band
-        keep = findall(t -> t in CURVE_WINDOW, curve_t)
-        for s in structures   # `structures` is already ordered low → high hierarchy
-            lines!(ax, curve_t[keep], curves[s][keep]; color = structure_color[s], linewidth = 2, label = s)
-        end
-        axislegend(ax; position = :lt, framevisible = false, labelsize = 9, nbanks = 2)
-    end
-
-    begin # * b --- the correlation itself: each region's exponent against its hierarchy score
-        ax = Axis(
-            gs[2][1, 1]; xlabel = "Hierarchy score",
-            ylabel = "Variability exponent",
-            title = "Exponent vs hierarchy",
-            yautolimitmargin = (0.08, 0.22)   # headroom for the region labels above each point
-        )
-        xs = [p.h for p in points]
-        ys = [p.m for p in points]
-        errorbars!(
-            ax, xs, ys, ys .- [p.lo for p in points], [p.hi for p in points] .- ys;
-            color = :gray70, whiskerwidth = 6
-        )
-        scatter!(
-            ax, xs, ys; color = [structure_color[p.structure] for p in points],
-            markersize = 18, strokecolor = :black, strokewidth = 0.8
-        )
-        for p in points   # regions are few enough to name directly; no legend needed
-            text!(
-                ax, p.h, p.m; text = p.structure, fontsize = 10,
-                align = (:center, :bottom), offset = (0, 10)
-            )
-        end
-        t = taus[findfirst(t -> t.layer == SCATTER_LAYER, taus)]
-        text!(
-            ax, 0.02, 0.02; text = "𝜏 = $(round(t.τ; digits = 3)), q = $(round(t.q; sigdigits = 2))",
-            space = :relative, align = (:left, :bottom), fontsize = 12
-        )
-    end
-
-    begin # * c --- the hierarchy correlation at each layer, in the reference panel's style
-        ax = Axis(
-            gs[3][1, 1]; xlabel = "Kendall's 𝜏", ylabel = "Cortical layer",
-            yticks = (collect(layer_codes), [layer_names[l] for l in layer_codes]),
-            title = "Hierarchy correlation", yreversed = true
-        )
-        vlines!(ax, 0; color = :gray, linestyle = :dash, linewidth = 1)
-        ls = [Float64(t.layer) for t in taus]
-        band!(
-            ax, Point2f.([t.σ[1] for t in taus], ls), Point2f.([t.σ[2] for t in taus], ls);
-            color = (SERIES, 0.25)
-        )
-        lines!(ax, [t.τ for t in taus], ls; color = SERIES, linewidth = 2)
-        sig = [t.q < PTHR for t in taus]
-        scatter!(ax, [t.τ for t in taus][sig], ls[sig]; color = SERIES, markersize = 12)
-        scatter!(
-            ax, [t.τ for t in taus][.!sig], ls[.!sig]; color = :transparent,
-            strokecolor = SERIES, strokewidth = 1, markersize = 12
-        )
-        @info "$(count(sig))/$(length(sig)) layers significant at q < $PTHR"
-    end
-
-    addlabels!(f)
-    display(f)
-end
-
-begin # * Save figure
-    wsave(PATH * ".pdf", f)
-    wsave(PATH * ".png", f)
-    @info "Saved $PATH"
-end
-
-begin # * Save source data
-    mkpath(PATH)
-    keep = findall(t -> t in CURVE_WINDOW, curve_t)
-    writedlm(
-        joinpath(PATH, "panelA.tsv"),
-        vcat(
-            hcat("t_ms", permutedims(structures)),
-            hcat(curve_t[keep], reduce(hcat, [curves[s][keep] for s in structures]))
-        ), '\t'
-    )
-    writedlm(
-        joinpath(PATH, "panelB.tsv"),
-        vcat(
-            ["structure" "hierarchy" "median" "lo" "hi"],
-            reduce(vcat, [permutedims([p.structure, p.h, p.m, p.lo, p.hi]) for p in points])
-        ), '\t'
-    )
-    writedlm(
-        joinpath(PATH, "panelC.tsv"),
-        vcat(
-            ["layer" "tau" "lo" "hi" "p" "q"],
-            reduce(vcat, [permutedims([layer_names[t.layer], t.τ, t.σ[1], t.σ[2], t.p, t.q]) for t in taus])
-        ), '\t'
-    )
-    @info "Saved source data to $PATH"
 end

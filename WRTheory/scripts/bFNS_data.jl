@@ -16,7 +16,10 @@ import FractionalNeuralSampling.Samplers: gen_lfsm_fns
 import FFTW
 FFTW.set_num_threads(1) # FFTW's own threads segfault (ip: nil) under `julia -t auto` on cartman; these 1-D FFTs lose nothing
 
-# Produces datadir("bFNS_data.jld2"), plotted by the top-level scripts/Fig2_bFNS.jl.
+# Produces datadir("bFNS_data.jld2"), plotted by the top-level scripts/Fig2_bFNS.jl (the bFNS
+# figure) and scripts/FigS23_summaries.jl (the unimodal and bimodal supplementary summaries).
+# The three samplers --- unconfined, unimodal, bimodal --- share one noise realisation, so any
+# panel that compares them differs only by the potential.
 
 begin # * Shared parameters
     tspan = 5000.0
@@ -194,24 +197,30 @@ begin # * Sample time series: effect of α, β, γ
     ts_windows = [sol[𝑡 = 2 .. ts_tspan] for sol in ts_sols] # representative window
 end
 
-begin # * Long simulations for scaling estimates (flat vs unimodal samplers)
+begin # * Long simulations for scaling estimates (flat, unimodal and bimodal samplers)
     sum_tmax = 25000.0
     sum_tmin = 5000.0 # ms transient
     sum_params = (; shared_params..., tspan = sum_tmax)
+    γ_bimodal = 0.02 # the momentum coupling the bimodal sweep was run at
     sum_noise = gen_lfsm_fns(
         sum_params.α, sum_params.β;
         tspan = sum_tmax, dt = sum_params.dt, seed = sum_params.seed,
         nhist = round(Int, sum_params.τ / sum_params.dt)
-    ) # same noise for both samplers
+    ) # same noise for all three samplers
 
-    function summary_sol(𝜋)
-        S = bFNS(; sum_params..., 𝜋, noise = sum_noise)
+    summary_sampler(𝜋; kwargs...) = bFNS(;
+        (; sum_params..., 𝜋, kwargs...)..., noise = sum_noise
+    )
+    function summary_sol(S)
         sol = solve(S) |> Timeseries |> eachcol |> first
         sol = rectify(sol, dims = 𝑡; tol = 1)[𝑡 = sum_tmin .. sum_tmax]
         return set(sol, 𝑡 => times(sol) ./ 1000) # to s
     end
-    ssol = summary_sol(test_density(:flat)) # unconfined
-    gsol = summary_sol(test_density(:unimodal))
+
+    sS = summary_sampler(test_density(:flat)) # unconfined
+    gS = summary_sampler(test_density(:unimodal))
+    bS = summary_sampler(test_density(:bimodal); γ = γ_bimodal)
+    ssol, gsol, bsol = summary_sol.((sS, gS, bS))
 end
 
 begin # * MAD scaling + fitted diffusion exponent
@@ -239,13 +248,55 @@ begin # * Power spectra + fitted spectral exponent
     psd_fit_y = predict(m_psd, psd_fit_x)
 end
 
-begin # * Exponent maps over (α, β) for the flat sampler, from the bFNS sweep
-    sweep = wload(datadir("bFNS_sweep", "flat_γ=$(shared_params.γ)_η=$(shared_params.η).jld2"))
-    slice(k) = Dropdims(mean)(
-        sweep[k][η = At(shared_params.η), γ = At(shared_params.γ)], dims = Obs
-    )
-    ma = slice("diffusion_exponent")
-    ms = slice("spectral_exponent")
+# ──────────────────────────────────────────────────────────────────────────────
+# Supplementary summaries of the two confined samplers (FigS2, FigS3)
+# ──────────────────────────────────────────────────────────────────────────────
+
+begin # * Bimodal potential, on the grid the unimodal one already uses
+    bi_V = potential(Density(bS)).(xs)
+    bi_V = bi_V .- minimum(bi_V)
+    bi_Ṽ = effective_potential(bS)(_xs)[idxs]
+    bi_Ṽ .-= minimum(bi_Ṽ)
+end
+
+begin # * Sampled distributions against their targets
+    box = only(FractionalNeuralSampling.domain(shared_params.boundaries))
+    uni_accuracy = samplingaccuracy(gsol, Density(gS); domain = box)
+    bi_accuracy = samplingaccuracy(bsol, Density(bS); domain = box)
+    uni_target = Density(gS).(xs)
+    bi_target = Density(bS).(xs)
+    bins = range(prange..., length = 25) # the binning the density panels draw
+end
+
+begin # * Bimodal MAD scaling + fitted diffusion exponent
+    bi_mads = madev(bsol, τs)
+    m_bi_mad = fit(MAPPLE, bi_mads[𝑡 = frange]; peaks = 0, components = 1)
+    fit!(m_bi_mad, bi_mads[𝑡 = frange])
+    bi_a_exponent = m_bi_mad.params.components[1].β
+    bi_mad_fit = predict(m_bi_mad, τfit)
+end
+
+begin # * Bimodal power spectrum + fitted spectral exponent
+    # f_min = 3 Hz rather than the 1 Hz used above: the shorter windows average down the
+    # mode-switching variance, which otherwise swamps the scaling band.
+    bi_psd = spectrum(bsol .- mean(bsol), 3.0; padding = 1000)[𝑓 = eps() .. 1000]
+    bi_logs = logsample(ustripall(bi_psd)[𝑓 = 10 .. 1000])
+    m_bi_psd = fit(MAPPLE, bi_logs; peaks = 0, components = 1)
+    fit!(m_bi_psd, bi_logs)
+    bi_b_exponent = m_bi_psd.params.components[end].β
+    bi_psd_fit_x = collect(lookup(bi_logs, 1))
+    bi_psd_fit_y = predict(m_bi_psd, bi_psd_fit_x)
+end
+
+begin # * Exponent and accuracy maps over (α, β), from the bFNS sweep
+    function sweep_maps(density, γ, η)
+        sweep = wload(datadir("bFNS_sweep", "$(density)_γ=$(γ)_η=$(η).jld2"))
+        slice(k) = Dropdims(mean)(sweep[k][η = At(η), γ = At(γ)], dims = Obs)
+        return slice("diffusion_exponent"), slice("spectral_exponent"), slice("accuracy")
+    end
+    ma, ms, _ = sweep_maps("flat", shared_params.γ, shared_params.η)
+    uni_ma, uni_ms, uni_macc = sweep_maps("unimodal", shared_params.γ, shared_params.η)
+    bi_ma, bi_ms, bi_macc = sweep_maps("bimodal", γ_bimodal, shared_params.η)
 end
 
 begin # * Save
@@ -272,10 +323,26 @@ begin # * Save
             "b_exponent" => b_exponent,
             # g, h: Obs-mean exponent maps
             "ma" => ma, "ms" => ms,
+            # FigS2 --- unimodal sampler (its potential is Fig2's "Vs"/"Ṽs")
+            "uni_samples" => collect(gsol), "uni_target" => uni_target,
+            "uni_accuracy" => uni_accuracy,
+            "uni_ma" => uni_ma, "uni_ms" => uni_ms, "uni_macc" => uni_macc,
+            # FigS3 --- bimodal sampler
+            "bi_V" => bi_V, "bi_Ṽ" => bi_Ṽ,
+            "bi_samples" => collect(bsol), "bi_target" => bi_target,
+            "bi_accuracy" => bi_accuracy,
+            "bi_mads" => collect(bi_mads), "bi_mad_fit" => bi_mad_fit,
+            "bi_a_exponent" => bi_a_exponent,
+            "bi_psd" => bi_psd,
+            "bi_psd_fit_x" => bi_psd_fit_x, "bi_psd_fit_y" => bi_psd_fit_y,
+            "bi_b_exponent" => bi_b_exponent,
+            "bi_ma" => bi_ma, "bi_ms" => bi_ms, "bi_macc" => bi_macc,
+            # binning shared by the two density panels
+            "bins" => collect(bins),
             # scalars for labels and the working-regime marker
             "params" => (;
                 α = shared_params.α, β = shared_params.β,
-                γ = shared_params.γ, η = shared_params.η,
+                γ = shared_params.γ, γ_bimodal, η = shared_params.η,
                 tspan, dt, seed, τ, α1, α2, β1, β2, β_hi, β_lo,
             ),
         )
