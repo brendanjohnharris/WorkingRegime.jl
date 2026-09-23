@@ -10,8 +10,6 @@ export convert2, variability_exponent, variability_model, VARIABILITY_SEED,
 
 const DEWDROP_BACKEND = Dewdrop.GPU
 
-# Kept for script compatibility: was a PythonCall `pyconvert` wrapper; native results are already Julia
-# values, so this is just a typed converter (`convert2(Float32)(x) == convert(Float32, x)`).
 convert2(T::Type) = Base.Fix1(convert, T)
 
 include("Variability.jl")

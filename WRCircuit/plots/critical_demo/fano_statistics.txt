@@ -1,2 +1,0 @@
-unified (flat-rise-flat on neuron-median curve): (β = 0.277148449985779, lo = 9.652143614713745, hi = 115.03140324902695)
-split-half β (odd/even neurons): (0.27717435587146, 0.2769049838144303), Δ = 0.00026937205702970424
