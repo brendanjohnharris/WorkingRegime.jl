@@ -45,7 +45,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 AllenNeuropixelsBase = {rev = "main", url = "https://www.github.com/brendanjohnharris/AllenNeuropixelsBase.jl"}
 
 [compat]
-AllenNeuropixelsBase = "0.5.0"
+AllenNeuropixelsBase = "0.5"
 StableDistributions = "1.0.4"
 TimeseriesSurrogates = "2.8.0"
 

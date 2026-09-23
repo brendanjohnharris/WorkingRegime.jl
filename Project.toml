@@ -8,8 +8,8 @@ projects = ["WRCircuit", "WRExperiment", "WRTheory"]
 [deps]
 AcademicClusters = "0d53aa51-fded-4285-958f-a79747f7b7b4"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Colors = "5ae59095-9a9b-59fe-a467-6f913c188581"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 DrWatson = "634d3b9d-ee7a-5ddf-bec9-22491ea816e1"
 Fathom = "05518021-a905-466c-bf96-cf0c89e1b0a0"
@@ -32,9 +32,6 @@ TimeseriesTools = "380cddd1-6ef2-46ca-b087-e7151fb095ff"
 AcademicClusters = {url = "https://github.com/brendanjohnharris/AcademicClusters.jl"}
 Fathom = {rev = "main", url = "https://github.com/brendanjohnharris/Fathom.jl"}
 MoreMaps = {rev = "main", url = "https://github.com/brendanjohnharris/MoreMaps.jl"}
-TimeseriesBase = {rev = "main", url = "https://github.com/brendanjohnharris/TimeseriesBase.jl"}
-TimeseriesMakie = {rev = "main", url = "https://github.com/brendanjohnharris/TimeseriesMakie.jl"}
-TimeseriesTools = {rev = "main", url = "https://github.com/brendanjohnharris/TimeseriesTools.jl"}
 
 [compat]
 CUDA_Runtime_jll = "0.12 - 0.23"
@@ -43,7 +40,7 @@ DataFrames = "1"
 DrWatson = "2"
 JLD2 = "0.6"
 MoreMaps = "0.3, 0.4"
-TimeseriesMakie = "0.2.2, 0.3"
+TimeseriesMakie = "0.2.2, 0.3, 0.4"
 TimeseriesTools = "0.8, 0.9"
 julia = "1.13"
 
