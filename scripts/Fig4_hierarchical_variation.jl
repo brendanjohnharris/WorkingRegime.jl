@@ -65,7 +65,7 @@ _select_outer(x, dimname::Symbol, val) = _select(x, dimname => val)
 # Load aggregated experiment data
 # ──────────────────────────────────────────────────────────────────────────────
 
-const inpath = projectdir("WRExperiment", "data", "WRExperiment.jld2")
+const inpath = datadir("WRExperiment", "WRExperiment.jld2")
 plot_data = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), inpath;
     typemap = toolsarray_typemap
@@ -74,7 +74,7 @@ plot_data = jldopen(
 # Circuit per-neuron exponent grids — three planes through the working-regime
 # point, each saved as (axis₁, axis₂, seed) of per-neuron exponent vectors. We
 # pool seed + neuron to a per-cell median for the heatmaps and the arrows.
-const circuit_path = projectdir("WRCircuit", "data", "circuit_exponents.jld2")
+const circuit_path = datadir("WRCircuit", "circuit_exponents.jld2")
 circuit = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), circuit_path;
     typemap = toolsarray_typemap
@@ -198,16 +198,14 @@ const gk_dir = mean_direction(
 # bFNS theory sweep — (α, β) → (a, b) direction arrows
 #
 # The flat (unconfined) sweep is the same grid behind the theory figure's
-# (α, β) → (a, b) heatmaps: WRTheory/data/bFNS_sweep/flat_γ=0.03_η=0.01.jld2
+# (α, β) → (a, b) heatmaps: data/WRTheory/bFNS_sweep/flat_γ=0.03_η=0.01.jld2
 # holds `diffusion_exponent` and `spectral_exponent` as ToolsArrays over
 # (α, β, γ, η, Obs). We NaN-aware average over the Obs seeds (and the singleton
 # γ, η axes) to get 2-D (α, β) exponent grids, then reuse `mean_direction` to read
 # the local Jacobian directions at the canonical operating point (α = 1.5, β = 0.85).
 # ──────────────────────────────────────────────────────────────────────────────
 
-const bfns_path = projectdir(
-    "WRTheory", "data", "bFNS_sweep", "flat_γ=0.03_η=0.01.jld2"
-)
+const bfns_path = datadir("WRTheory", "bFNS_sweep", "flat_γ=0.03_η=0.01.jld2")
 bfns = jldopen(
     f -> Dict(k => f[k] for k in keys(f)), bfns_path;
     typemap = toolsarray_typemap
@@ -303,19 +301,16 @@ const points_l23 = compute_points(2)   # L2/3
 # caches it): `exponents[layer]` is a (SessionID × Structure) matrix in `structures` order, so c
 # bootstraps over sessions exactly as a and b do. Read rather than refit --- the fit needs the
 # unit-level Fano tables, which are slow to load.
-const variability_path = projectdir(
-    "WRExperiment", "data", "variability_variation", "variability_exponents.jld2"
+const variability_path = datadir(
+    "WRExperiment", "variability_variation", "variability_exponents.jld2"
 )
-const c_exponents = if isfile(variability_path)
-    jldopen(f -> f["exponents"], variability_path, "r")
-else
-    @warn "No $variability_path --- run WRExperiment/scripts/variability_variation.jl for the c column"
-    nothing
-end
+isfile(variability_path) ||
+    error("No $variability_path --- run WRExperiment/scripts/variability_variation.jl for the c column")
+const c_exponents = jldopen(f -> f["exponents"], variability_path, "r")
 
-"One region's variability exponents across sessions at `layer_idx`; empty if the cache is absent."
+"One region's variability exponents across sessions at `layer_idx`; empty if the layer is absent."
 function region_c(structure, layer_idx)
-    (isnothing(c_exponents) || !haskey(c_exponents, layer_idx)) && return Float64[]
+    haskey(c_exponents, layer_idx) || return Float64[]
     return c_exponents[layer_idx][:, findfirst(==(structure), structures)]
 end
 
@@ -536,7 +531,7 @@ begin # * Top right — hierarchy correlation of each exponent, by layer
     """
     function exponent_matrix(sym, layer_idx)
         if sym == "c"
-            (isnothing(c_exponents) || !haskey(c_exponents, layer_idx)) && return nothing
+            haskey(c_exponents, layer_idx) || return nothing
             return Float64.(c_exponents[layer_idx])
         end
         raw = sym == "a" ? region_a_raw : region_b_raw
@@ -791,16 +786,12 @@ construction, making the data value itself the effect size; for `a` the differen
 process. `p` is an exact sign test across sessions (a signed-rank would need HypothesisTests, which
 this project does not carry); with the observed consistency it is far from the deciding factor.
 
-Reads `WRExperiment/data/surrogates_ft`, written by `WRExperiment/scripts/run_surrogates.jl`. Skips
-with a warning if that sweep has not been run.
+Reads `data/WRExperiment/surrogates_ft`, written by `WRExperiment/scripts/run_surrogates.jl`.
 """
 function save_surrogate_statistics(layer_idx = 2)
-    dir = projectdir("WRExperiment", "data", "surrogates_ft")
+    dir = datadir("WRExperiment", "surrogates_ft")
     files = isdir(dir) ? filter(contains("stimulus=$stim"), readdir(dir; join = true)) : String[]
-    if isempty(files)
-        @warn "No surrogate sweep in $dir --- run WRExperiment/scripts/run_surrogates.jl"
-        return nothing
-    end
+    isempty(files) && error("No surrogate sweep in $dir --- run WRExperiment/scripts/run_surrogates.jl")
 
     # One row per (session, region): the median over this layer's channels, for the data and for the
     # mean of the surrogate draws. Aggregation is replicated inside the null so the two are comparable.

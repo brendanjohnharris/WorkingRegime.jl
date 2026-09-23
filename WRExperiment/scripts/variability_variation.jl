@@ -7,7 +7,7 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 #
 # Derives the third exponent for Figure 4: the VARIABILITY exponent, the scaling slope of each
 # session's unit-median Fano-factor curve (the BIC-selected MAPPLE fit, `variability_exponent` from
-# this package). The result is cached under `datadir(NAME)` and read by
+# this package). The result is cached under `rootdatadir(NAME)` and read by
 # `scripts/Fig4_hierarchical_variation.jl`; the standalone figure this script used to draw is gone.
 #
 # The hierarchy statistics below are kept because they are self-checking (see `selfcheck`) and their
@@ -31,7 +31,7 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 
 using DrWatson
 @quickactivate "WRExperiment"
-import WRExperiment: variability_exponent  # named import: the script defines its own `structures` etc.
+import WRExperiment: variability_exponent, rootdatadir  # named import: the script defines its own `structures` etc.
 using JLD2
 using DataFrames
 using TimeseriesTools
@@ -62,7 +62,7 @@ const NBOOT = 10_000
 const SEED = 42
 
 const NAME = "variability_variation"
-const inpath = datadir("WRExperiment.jld2")
+const inpath = rootdatadir("WRExperiment.jld2")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Derive the variability exponent per (structure, session, layer)
@@ -172,7 +172,7 @@ end
 # Files predating that key carry no estimator and are accepted: they came from this same fit.
 const ESTIMATOR = "floor-bic"
 data, datapath = produce_or_load(
-    derive_exponents, Dict("stim" => stim, "estimator" => ESTIMATOR), datadir(NAME);
+    derive_exponents, Dict("stim" => stim, "estimator" => ESTIMATOR), rootdatadir(NAME);
     filename = "variability_exponents", tag = true
 )
 let cached = get(data, "estimator", nothing)

@@ -184,21 +184,21 @@ end
 # ──────────────────────────────────────────────────────────────────────────────
 
 @info "Loading experiment data"
-traces = jldopen(f -> Dict(k => f[k] for k in keys(f)), projectdir("WRExperiment", "data", "traces.jld2"))
-incr = jldopen(f -> Dict(k => f[k] for k in keys(f)), projectdir("WRExperiment", "data", "increment_histograms.jld2"))
+traces = jldopen(f -> Dict(k => f[k] for k in keys(f)), datadir("WRExperiment", "traces.jld2"))
+incr = jldopen(f -> Dict(k => f[k] for k in keys(f)), datadir("WRExperiment", "increment_histograms.jld2"))
 plot_data = jldopen(
     f -> Dict(k => f[k] for k in keys(f)),
-    projectdir("WRExperiment", "data", "WRExperiment.jld2"); typemap = toolsarray_typemap
+    datadir("WRExperiment", "WRExperiment.jld2"); typemap = toolsarray_typemap
 )
 
 @info "Loading circuit data"
-circuit = loadtoolsarray(projectdir("WRCircuit", "data", "circuit_curves.jld2"), "circuit_curves")
+circuit = loadtoolsarray(datadir("WRCircuit", "circuit_curves.jld2"), "circuit_curves")
 cstats = jldopen(
     f -> Dict(k => f[k] for k in keys(f)),
-    projectdir("WRCircuit", "data", "demo_run_stats.jld2"); typemap = toolsarray_typemap
+    datadir("WRCircuit", "demo_run_stats.jld2"); typemap = toolsarray_typemap
 )
 craw = jldopen(
-    projectdir("WRCircuit", "data", "demo_run.jld2"); typemap = toolsarray_typemap
+    datadir("WRCircuit", "demo_run.jld2"); typemap = toolsarray_typemap
 ) do f                                     # 2.2 GB on disk: take only what the panels draw
     Dict(
         "fixed_params" => f["fixed_params"], "N" => f["N"],

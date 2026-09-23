@@ -13,7 +13,7 @@ import FractionalNeuralSampling.Samplers: gen_lfsm_fns
 import FFTW
 FFTW.set_num_threads(1) # FFTW's own threads segfault (ip: nil) under `julia -t auto` on cartman; these 1-D FFTs lose nothing
 
-# Produces datadir("Fig3_effective_theory.jld2"), plotted by the top-level
+# Produces rootdatadir("Fig3_effective_theory.jld2"), plotted by the top-level
 # scripts/Fig3_effective_theory.jl.
 
 begin # * Options
@@ -113,7 +113,7 @@ end
 
 begin # * Save
     tagsave(
-        datadir("Fig3_effective_theory.jld2"),
+        rootdatadir("Fig3_effective_theory.jld2"),
         Dict(
             "sol" => sol, # neuron (V, w), transient removed, times in s
             "input_sol" => input_sol, # sampler input, transient removed, times in s
@@ -124,5 +124,5 @@ begin # * Save
             "params" => (; α, β, η, γ, transient, tspan, dt, seed),
         )
     )
-    @info "wrote" datadir("Fig3_effective_theory.jld2")
+    @info "wrote" rootdatadir("Fig3_effective_theory.jld2")
 end

@@ -18,7 +18,7 @@ using JLD2
 import AllenNeuropixelsBase as AN
 
 method = isempty(ARGS) ? :ft : Symbol(first(ARGS)) # :ft (default) or :iaaft
-path = DrWatson.datadir(method === :iaaft ? "surrogates" : "surrogates_$(method)")
+path = rootdatadir(method === :iaaft ? "surrogates" : "surrogates_$(method)") # also the `outpath` below: one folder for the check and the writes
 mkpath(path)
 stimuli = ["spontaneous"]
 session_table = load(DrWatson.datadir("session_table.jld2"), "session_table")
@@ -53,7 +53,7 @@ if !isempty(params)
                 import AllenNeuropixelsBase as AN
                 using WRExperiment
                 WRExperiment.send_surrogates(
-                    $o, $stimulus, $structure; n = 20, method = $(QuoteNode(method))
+                    $o, $stimulus, $structure; n = 20, method = $(QuoteNode(method)), outpath = $path
                 )
             end
         end
@@ -70,7 +70,7 @@ if !isempty(params)
     else
         map(Chart(LogLogger()), params) do param # serial over conditions; surrogates + fits thread inside
             @info "Calculating surrogates for $(param)"
-            WRExperiment.send_surrogates(param...; n = 20, method)
+            WRExperiment.send_surrogates(param...; n = 20, method, outpath = path)
             GC.gc()
         end
     end

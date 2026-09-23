@@ -30,7 +30,7 @@ include("VisualCoding.jl")
 # Public API for the scripts (replaces what they used to get from `using SpatiotemporalMotifs`).
 # `Unit` is re-exported from AllenNeuropixelsBase; the rest are vendored/defined here.
 export structures, layers, PTHR, hierarchy_scores, bootstrapmedian, val_to_string,
-    calcquality, savepath, SessionID, Trial, Structure, Unit, DEFAULT_SESSION_ID,
+    calcquality, savepath, rootdatadir, SessionID, Trial, Structure, Unit, DEFAULT_SESSION_ID,
     sessionkendall, sessionmatrix, bhadjust, @preamble,
     send_madev, formatlfp, LFP_TOLERANCES, produce_unitdepths, madev, mapple_fit, diffusion_fit, diffusion_line, diffusion_knee,
     confirm_band_before_knee, fano_factor, rates, plotspectrum!,

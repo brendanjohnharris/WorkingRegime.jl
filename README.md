@@ -21,7 +21,7 @@ Since every script is executable through its `bash` header and activates its own
 
 # Producing the data
 
-The three groups below are independent of one another; within a group, run the steps in order. Outputs are written to each package's `data/` directory. Steps marked *cluster* use cluster jobs or workers when run on the USyd Physics cluster (or NCI Gadi, for the circuit sweep) and local workers otherwise; steps marked *GPU* need a CUDA device.
+The three groups below are independent of one another; within a group, run the steps in order. Files read by a figure (those whose *Used by* names one) are written to `data/<Module>/` at the repository root; the rest are intermediates, kept in each package's own `data/` directory. Steps marked *cluster* use cluster jobs or workers when run on the USyd Physics cluster (or NCI Gadi, for the circuit sweep) and local workers otherwise; steps marked *GPU* need a CUDA device.
 
 ## Experiment ([`WRExperiment/scripts/`](WRExperiment/scripts/))
 
@@ -57,7 +57,7 @@ Since steps 6 and 7 carry their own session list, they do not need step 1.
 
 # Producing the figures
 
-Once the data above exist, draw the figures with:
+The figure inputs are also deposited on Zenodo (DOI to be added), one archive per module; unpacking each archive into `data/` replaces running the steps above. Once the data exist, draw the figures with:
 ```bash
 bash make_plots
 ```

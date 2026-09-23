@@ -20,7 +20,7 @@ begin # * Options
     NAME = "Fig3_effective_theory"
     outdir = plotsdir(NAME)
     schematic = projectdir("assets", "mean_field_schematic.svg")
-    datafile = projectdir("WRTheory", "data", "Fig3_effective_theory.jld2")
+    datafile = datadir("WRTheory", "Fig3_effective_theory.jld2")
 end
 
 begin # * Load data (produced by WRTheory/scripts/Fig3_effective_theory_data.jl)

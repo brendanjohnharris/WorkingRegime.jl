@@ -23,7 +23,7 @@ set_theme!(Fathom.fathom())
 begin # * Options
     NAME = "FigS23_summaries"
     outdir = plotsdir(NAME)
-    datafile = projectdir("WRTheory", "data", "bFNS_data.jld2") # shared with Fig2
+    datafile = datadir("WRTheory", "bFNS_data.jld2") # shared with Fig2
     nyticks = 4
     MAP_DY = -29 # see the `addlabels!` calls: drops a map letter onto its Label title's line
     # Drawn spacing is `gap + protrusion`, and the band above the map row is nearly all

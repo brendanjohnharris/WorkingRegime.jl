@@ -26,7 +26,16 @@ macro preamble()
 end
 
 const connector = '&'
-export connector, variability_exponent, variability_model, VARIABILITY_SEED,
+
+"""
+    rootdatadir(args...)
+
+Path under the repository's `data/WRTheory/`, which holds every file a figure script reads
+(intermediates stay in `datadir()`). Anchored on the package folder, not the active project.
+"""
+rootdatadir(args...) = joinpath(dirname(pkgdir(WRTheory)), "data", "WRTheory", args...)
+
+export connector, rootdatadir, variability_exponent, variability_model, VARIABILITY_SEED,
     VARIABILITY_PINS, VARIABILITY_WIDTH, VARIABILITY_NOFIT
 
 include("Variability.jl")

@@ -4,7 +4,7 @@ using StatsBase
 using Random
 import Accessors: @set
 
-export connector, bootstrapmedian, to_ms
+export connector, rootdatadir, bootstrapmedian, to_ms
 
 function _preamble()
     return quote
@@ -34,6 +34,14 @@ end
 @preamble
 
 const connector = '&'
+
+"""
+    rootdatadir(args...)
+
+Path under the repository's `data/WRCircuit/`, which holds every file a figure script reads
+(intermediates stay in `datadir()`). Anchored on the package folder, not the active project.
+"""
+rootdatadir(args...) = joinpath(dirname(pkgdir(WRCircuit)), "data", "WRCircuit", args...)
 
 to_ms(x::Real) = x * u"ms" # Assume ms already
 to_ms(x::Quantity) = uconvert(u"ms", x)

@@ -1,7 +1,7 @@
 #! /bin/bash
 
 # Runs every figure script, in figure order. Prior to this script, EITHER:
-#     1. download the precomputed plot data, OR:
+#     1. download the precomputed plot data and unpack it into data/ (see README.md), OR:
 #     2. run the calculation scripts in the order given under "Producing the data" in README.md.
 
 PROJECT_DIR="$(dirname "$(realpath "$0")")"

@@ -56,9 +56,9 @@ const region_colors = cgrad(binarysunset, length(STRUCTURES); categorical = true
 const scolor = Dict(s => region_colors[i] for (i, s) in enumerate(STRUCTURES))
 
 D = jldopen(f -> Dict(k => f[k] for k in keys(f)),
-    projectdir("WRExperiment", "data", "visual_coding_$(COHORT).jld2"))
+    datadir("WRExperiment", "visual_coding_$(COHORT).jld2"))
 INC = jldopen(f -> Dict(k => f[k] for k in keys(f)),
-    projectdir("WRExperiment", "data", "visual_coding_increments_$(COHORT).jld2"))
+    datadir("WRExperiment", "visual_coding_increments_$(COHORT).jld2"))
 @info "loaded" cohort = D["cohort"] blocks = D["nblocks"] sessions = length(D["sessions"])
 
 taus, fr, ftaus = D["taus"], D["freqs"], D["fano_taus"]

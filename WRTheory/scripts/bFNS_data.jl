@@ -16,7 +16,7 @@ import FractionalNeuralSampling.Samplers: gen_lfsm_fns
 import FFTW
 FFTW.set_num_threads(1) # FFTW's own threads segfault (ip: nil) under `julia -t auto` on cartman; these 1-D FFTs lose nothing
 
-# Produces datadir("bFNS_data.jld2"), plotted by the top-level scripts/Fig2_bFNS.jl (the bFNS
+# Produces rootdatadir("bFNS_data.jld2"), plotted by the top-level scripts/Fig2_bFNS.jl (the bFNS
 # figure) and scripts/FigS23_summaries.jl (the unimodal and bimodal supplementary summaries).
 # The three samplers --- unconfined, unimodal, bimodal --- share one noise realisation, so any
 # panel that compares them differs only by the potential.
@@ -290,7 +290,7 @@ end
 
 begin # * Exponent and accuracy maps over (α, β), from the bFNS sweep
     function sweep_maps(density, γ, η)
-        sweep = wload(datadir("bFNS_sweep", "$(density)_γ=$(γ)_η=$(η).jld2"))
+        sweep = wload(rootdatadir("bFNS_sweep", "$(density)_γ=$(γ)_η=$(η).jld2"))
         slice(k) = Dropdims(mean)(sweep[k][η = At(η), γ = At(γ)], dims = Obs)
         return slice("diffusion_exponent"), slice("spectral_exponent"), slice("accuracy")
     end
@@ -301,7 +301,7 @@ end
 
 begin # * Save
     tagsave(
-        datadir("bFNS_data.jld2"),
+        rootdatadir("bFNS_data.jld2"),
         Dict(
             # a: potential + effective potential on the plotted grid
             "xs" => collect(xs), "Vs" => Vs, "Ṽs" => Ṽs,
@@ -347,5 +347,5 @@ begin # * Save
             ),
         )
     )
-    @info "wrote" datadir("bFNS_data.jld2")
+    @info "wrote" rootdatadir("bFNS_data.jld2")
 end

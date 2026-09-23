@@ -11,7 +11,7 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 #   - dg  plane: (delta, Delta_g_K)   - ds plane: (delta, sigma_ee)   - gs plane: (Delta_g_K, sigma_ee)
 #   - td  plane: (tau_r_e, tau_d_e)   - dtd plane: (delta, tau_d_e)
 # For each plane we fit the per-neuron diffusion exponent (from the input MAD) and spectral exponent (from the
-# input PSD) and save *all* per-neuron exponents (not neuron-averages) to data/circuit_exponents.jld2, KEEPING
+# input PSD) and save *all* per-neuron exponents (not neuron-averages) to data/WRCircuit/circuit_exponents.jld2, KEEPING
 # THE SEED AXIS EXPLICIT: every saved grid is (axis1, axis2, seed) of per-neuron exponent vectors, so
 # downstream scripts collapse the seed 'Obs' dimension as they wish.
 
@@ -191,8 +191,7 @@ try
     begin # * Save --- MERGE into circuit_exponents.jld2: only the planes computed this run are (over)written;
         # every other plane already in the file is loaded and kept. Each grid stays (axis1, axis2, seed) of
         # per-neuron exponent vectors, alongside its own axis lookups (+ anchors for the main δ planes).
-        mkpath(datadir("plots"))
-        outfile = datadir("circuit_exponents.jld2")
+        outfile = rootdatadir("circuit_exponents.jld2")
         merged = isfile(outfile) ? load(outfile) : Dict{String, Any}()
         if want(:dg)
             merged["a_dg"] = a_dg; merged["b_dg"] = b_dg

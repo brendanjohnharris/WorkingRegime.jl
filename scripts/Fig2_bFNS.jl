@@ -26,7 +26,7 @@ begin # * Options
     order_rows = true  # true: rows = {space, time}; false: columns = {space, time}
     NAME = "Fig2_bFNS"
     outdir = plotsdir(NAME)
-    datafile = projectdir("WRTheory", "data", "bFNS_data.jld2")
+    datafile = datadir("WRTheory", "bFNS_data.jld2")
     nyticks = 4
 end
 

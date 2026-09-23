@@ -71,14 +71,14 @@ Surrogate nulls for the quoted LFP statistics of one condition, loading the LFP 
 Gaussian), the null for "heavier-tailed / more anomalous than a linear Gaussian process"; `:iaaft`
 additionally preserves the amplitude distribution and answers the stricter question of whether the
 effect is dynamical rather than inherited from the marginal. Each method writes to its own `outpath`
-(`datadir("surrogates_ft")` and `datadir("surrogates")`). Saves the data statistics (`s0`), the `n`
+(`rootdatadir("surrogates_ft")` and `rootdatadir("surrogates")`). Saves the data statistics (`s0`), the `n`
 null statistics (`s`, one [`lfp_surrogate_stats`](@ref) tuple per draw), and per-channel layer labels
 for the collect step. Both statistics are one-sided LARGER than the null (`tail = :right`).
 """
 function send_surrogates(
         sessionid, stimulus, structure;
         n = 20, method = :ft,
-        outpath = DrWatson.datadir(method === :iaaft ? "surrogates" : "surrogates_$(method)")
+        outpath = rootdatadir(method === :iaaft ? "surrogates" : "surrogates_$(method)")
     )
     surr = method === :iaaft ? IAAFT() :
         method === :ft ? RandomFourier() :

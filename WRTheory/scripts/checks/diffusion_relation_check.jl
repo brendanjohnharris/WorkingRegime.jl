@@ -5,12 +5,13 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 # Diagnostic (not in the paper): test the Section IV claim that the unconfined bFNS diffusion
 # exponent follows a ≈ 1 - α/2 + β/2, against the saved flat sweeps
-# (data/bFNS_sweep/flat_*.jld2; per-cell 1-comp MAPPLE fits to the 0.1-10 ms MAD, 10 repeats).
+# (data/WRTheory/bFNS_sweep/flat_*.jld2; per-cell 1-comp MAPPLE fits to the 0.1-10 ms MAD, 10 repeats).
 # Also scores two alternative surfaces: the noise self-similarity H = 1/2 + 1/α - β/2 and the
 # space-time fractional-diffusion similarity β/α. Writes a summary txt + per-cell residual TSV
 # to plots/checks/.
 using DrWatson
 @quickactivate "WRTheory"
+import WRTheory: rootdatadir
 using JLD2
 using TimeseriesTools
 using Statistics
@@ -21,7 +22,7 @@ nanmean(x) = (v = filter(!isnan, vec(collect(x))); isempty(v) ? NaN : mean(v))
 "Collapse the stored (α, β, γ, η, Obs) diffusion-exponent array to a 2-D (α, β) grid by
 NaN-aware averaging over repeats (mean, matching the Fig 2 heatmaps)."
 function ab_grid(file)
-    A = load(datadir("bFNS_sweep", file), "diffusion_exponent")
+    A = load(rootdatadir("bFNS_sweep", file), "diffusion_exponent")
     da = parent(A)
     αs = try
         collect(lookup(A, :α))

@@ -19,7 +19,7 @@ set_theme!(Fathom.fathom())
 
 begin
     @info "Loading data"
-    rawfile = datadir("demo_run.jld2")   # now holds only the last 5 s of raw traces + scalars
+    rawfile = rootdatadir("demo_run.jld2")   # now holds only the last 5 s of raw traces + scalars
     fixed_params = load(rawfile, "fixed_params")
     epositions = load(rawfile, "epositions")
     ipositions = load(rawfile, "ipositions")
@@ -100,7 +100,7 @@ end
 
 
 begin # * Load precomputed statistics (computed in scripts/demo_run.jl)
-    statsfile = datadir("demo_run_stats.jld2")
+    statsfile = rootdatadir("demo_run_stats.jld2")
     fano = load(statsfile, "fano")
     mfano = load(statsfile, "mfano")
     spectra = load(statsfile, "spectra")
@@ -337,9 +337,8 @@ begin # * Save pre-computed curves for combined plotting
         ),
     )
 
-    mkpath(datadir("plots"))
-    jldsave(datadir("circuit_curves.jld2"); circuit_curves)
-    @info "Saved circuit curves to $(datadir("circuit_curves.jld2"))"
+    jldsave(rootdatadir("circuit_curves.jld2"); circuit_curves)
+    @info "Saved circuit curves to $(rootdatadir("circuit_curves.jld2"))"
 end
 
 # The across-neuron distributions of αs/βs/μs/σs are drawn by scripts/FigS4_input_parameters.jl,

@@ -202,7 +202,7 @@ end
 
 # ---------------------------------------------------------------------------- assemble
 curves, _ = produce_or_load(
-    Dict(), DrWatson.datadir();
+    Dict(), rootdatadir();
     filename = savepath("visual_coding_$(TAG)")
 ) do _
     blocks = loadblocks(CALCDIR)
@@ -246,7 +246,7 @@ end
 # are standardised by their own SD before pooling, and one Fourier-transform surrogate per channel
 # gives the Gaussian null empirically alongside the analytic one.
 increments, _ = produce_or_load(
-    Dict(), DrWatson.datadir();
+    Dict(), rootdatadir();
     filename = savepath("visual_coding_increments_$(TAG)")
 ) do _
     counts, counts_surr = zeros(Int, length(EDGES) - 1), zeros(Int, length(EDGES) - 1)
@@ -301,4 +301,4 @@ increments, _ = produce_or_load(
     )
 end
 
-@info "done" curves = DrWatson.datadir("visual_coding_$(TAG).jld2") increments = DrWatson.datadir("visual_coding_increments_$(TAG).jld2") nblocks = curves["nblocks"] nchannels = increments["nchannels"]
+@info "done" curves = rootdatadir("visual_coding_$(TAG).jld2") increments = rootdatadir("visual_coding_increments_$(TAG).jld2") nblocks = curves["nblocks"] nchannels = increments["nchannels"]

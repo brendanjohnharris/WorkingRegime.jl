@@ -23,7 +23,7 @@ set_theme!(Fathom.fathom())
 begin # * Options
     NAME = "FigS4_input_parameters"
     outdir = plotsdir(NAME)
-    datafile = projectdir("WRCircuit", "data", "demo_run_stats.jld2")
+    datafile = datadir("WRCircuit", "demo_run_stats.jld2")
     nbins = 20
     # (key, panel title, axis label, plotted quantile window). A handful of neurons take
     # pathological location fits (μ spans -20.5 to 47.5 nA against an interquartile width of

@@ -52,7 +52,7 @@ const CLIP_QUANTILE = 0.995
 
 @info "Loading circuit data"
 craw = jldopen(
-    projectdir("WRCircuit", "data", "demo_run.jld2"); typemap = toolsarray_typemap
+    datadir("WRCircuit", "demo_run.jld2"); typemap = toolsarray_typemap
 ) do f                                       # 2.2 GB on disk: take only the input field
     Dict("fixed_params" => f["fixed_params"], "N" => f["N"], "E_input" => f["E_input"])
 end

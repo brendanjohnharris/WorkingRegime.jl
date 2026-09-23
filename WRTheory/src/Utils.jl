@@ -57,7 +57,7 @@ end
 
 function simulate_bFNS_sweep(params)
     function _simulate(α, β, γ, η, obs)
-        seed = rand(UInt32)
+        seed = UInt32(obs + 100 * (round(Int, 1000α) + 10_000 * round(Int, 1000β))) # distinct per (α, β, obs); unlike `hash`, stable across Julia versions
         simulate_bFNS_sweep(params, α, β, γ, η, seed)
     end
 end

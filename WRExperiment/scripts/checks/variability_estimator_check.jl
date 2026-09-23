@@ -13,7 +13,7 @@ exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 using DrWatson
 @quickactivate "WRExperiment"
 import WRExperiment: variability_exponent, variability_model, VARIABILITY_PINS,
-    VARIABILITY_WIDTH, VARIABILITY_SEED
+    VARIABILITY_WIDTH, VARIABILITY_SEED, rootdatadir
 using JLD2
 using DataFrames
 using TimeseriesTools
@@ -36,7 +36,7 @@ builds the drawn Fig 1 median (median across units, then across sessions, over 1
 """
 function experiment_sessions()
     ud = jldopen(
-        f -> f["fano_data"], datadir("WRExperiment.jld2"),
+        f -> f["fano_data"], rootdatadir("WRExperiment.jld2"),
         "r"; typemap = toolsarray_typemap
     )["spontaneous"]["unitdepths"][1] # [1] is VISp
     curves = map(ud) do units
@@ -60,7 +60,7 @@ const SESSIONS = experiment_sessions()
 @info "  $(length(SESSIONS)) VISp L2/3 sessions"
 @info "Loading circuit per-neuron Fano curves"
 const CFANO = jldopen(
-    f -> f["fano"], normpath(projectdir("..", "WRCircuit", "data", "demo_run_stats.jld2")),
+    f -> f["fano"], joinpath(dirname(rootdatadir()), "WRCircuit", "demo_run_stats.jld2"),
     "r"; typemap = toolsarray_typemap
 )
 neuron_median(js) = dropdims(median(CFANO[:, js], dims = 2), dims = 2)

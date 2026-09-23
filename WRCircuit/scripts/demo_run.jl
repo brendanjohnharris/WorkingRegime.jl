@@ -15,7 +15,7 @@ using StatsBase: Histogram, merge!
 using Logging, TerminalLoggers
 WRCircuit.@preamble
 set_theme!(fathom())
-outfile = datadir("demo_run.jld2")
+outfile = rootdatadir("demo_run.jld2")
 
 begin
     model = WRCircuit.models.Spatial
@@ -266,12 +266,12 @@ begin # * Save the last 5 s of raw data (traces, input field, E/I raster) --- no
             "N" => N,
             "mean_V" => mean_V,
             "nu" => nu,
-        ), safe = true
+        ) # no safe = true: a rerun must overwrite, as the stats file below does
     )
 end
 
 begin # * Save derived statistics
-    statsfile = datadir("demo_run_stats.jld2")
+    statsfile = rootdatadir("demo_run_stats.jld2")
     @info "Saving derived statistics to $(statsfile)"
     jldsave(
         statsfile;

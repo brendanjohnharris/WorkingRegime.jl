@@ -35,10 +35,7 @@ begin # * Create parameter grid
     αs = range(1.2, 2.0; length = 32) |> Dim{:α}
     obs = 1:10 |> Obs
 
-    γ = 0.03
     η = 0.01
-
-    γs = [γ] |> Dim{:γ}
     ηs = [η] |> Dim{:η}
 
     shared_params = (;
@@ -65,62 +62,20 @@ if false # * Heatmap of H values
     display(f)
 end
 
-begin # * Map over parameters for flat potential
-    params = (;
-        𝜋 = test_density(:flat),
-        shared_params...,
-    )
-
-    @info "Running flat sweep..."
-    C = Chart(
-        Iterators.product,
-        Pmap(),
-        ProgressLogger(1000)
-    )
-    res = map(simulate_bFNS_sweep(params), C, αs, βs, γs, ηs, obs)
-    out = map(keys(first(res))) do k
-        string(k) => map(Base.Fix2(getindex, k), res)
-    end |> Dict{String, Any}
-    out["params"] = params
-    tagsave(datadir("bFNS_sweep", "flat_γ=$(γ)_η=$(η).jld2"), out; safe = true)
-end
-
-begin # * Map over parameters for unimodal potential
-    params = (;
-        𝜋 = test_density(:unimodal),
-        shared_params...,
-    )
-
-    @info "Running unimodal sweep..."
-    C = Chart(
-        Iterators.product,
-        Pmap(),
-        ProgressLogger(1000)
-    )
-    res = map(simulate_bFNS_sweep(params), C, αs, βs, γs, ηs, obs)
-    out = map(keys(first(res))) do k
-        string(k) => map(Base.Fix2(getindex, k), res)
-    end |> Dict{String, Any}
-    out["params"] = params
-    tagsave(datadir("bFNS_sweep", "unimodal_γ=$(γ)_η=$(η).jld2"), out; safe = true)
-end
-
-begin # * Map over parameters for bimodal potential
-    params = (;
-        𝜋 = test_density(:bimodal),
-        shared_params...,
-    )
-
-    @info "Running bimodal sweep..."
-    C = Chart(
-        Iterators.product,
-        Pmap(),
-        ProgressLogger(1000)
-    )
-    res = map(simulate_bFNS_sweep(params), C, αs, βs, γs, ηs, obs)
-    out = map(keys(first(res))) do k
-        string(k) => map(Base.Fix2(getindex, k), res)
-    end |> Dict{String, Any}
-    out["params"] = params
-    tagsave(datadir("bFNS_sweep", "bimodal_γ=$(γ)_η=$(η).jld2"), out; safe = true)
+begin # * One sweep per test potential. γ is set per sweep: bFNS_data.jl reads the bimodal sweep at
+    # γ = 0.02, and the flat γ = 0 sweep feeds only checks/diffusion_relation_check.jl, so it runs last
+    sweeps = ((:flat, 0.03), (:unimodal, 0.03), (:bimodal, 0.02), (:flat, 0.0))
+    sweepfiles = map(sweeps) do (density, γ)
+        params = (; 𝜋 = test_density(density), shared_params...)
+        @info "Running $density sweep at γ = $γ..."
+        C = Chart(Iterators.product, Pmap(), ProgressLogger(1000))
+        res = map(simulate_bFNS_sweep(params), C, αs, βs, [γ] |> Dim{:γ}, ηs, obs)
+        out = map(keys(first(res))) do k
+            string(k) => map(Base.Fix2(getindex, k), res)
+        end |> Dict{String, Any}
+        out["params"] = params
+        file = rootdatadir("bFNS_sweep", "$(density)_γ=$(γ)_η=$(η).jld2")
+        tagsave(file, out) # overwrites; safe = true would divert a rerun to a `_#1` copy nothing reads
+        file
+    end
 end

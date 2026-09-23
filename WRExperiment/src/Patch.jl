@@ -553,6 +553,14 @@ function send_madev(
     return outfile
 end
 
+"""
+    rootdatadir(args...)
+
+Path under the repository's `data/WRExperiment/`, which holds every file a figure script reads
+(intermediates stay in `datadir()`). Anchored on the package folder, not the active project.
+"""
+rootdatadir(args...) = joinpath(dirname(pkgdir(WRExperiment)), "data", "WRExperiment", args...)
+
 # Vendored from SpatiotemporalMotifs (all unexported there) so the calc-quality machinery is SM-free.
 const connector = "&"
 const structures = ["VISp", "VISl", "VISrl", "VISal", "VISpm", "VISam"]

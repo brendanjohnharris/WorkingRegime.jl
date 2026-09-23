@@ -39,7 +39,7 @@ using LinearAlgebra
 
 begin # * Example LFP trace + spike raster (Fig 1b)
     traces_data, _ = produce_or_load(
-        Dict(), DrWatson.datadir(); filename = savepath("traces")
+        Dict(), rootdatadir(); filename = savepath("traces")
     ) do _
         sessionid = DEFAULT_SESSION_ID
         structure = "VISp"
@@ -74,7 +74,7 @@ end
 
 begin # * Pooled L2/3 increment distribution against its FT surrogate null (Fig 1, far right)
     increment_histograms, _ = produce_or_load(
-        Dict(), DrWatson.datadir(); filename = savepath("increment_histograms")
+        Dict(), rootdatadir(); filename = savepath("increment_histograms")
     ) do _
         n_sessions = nothing                           # nothing = every QC-passing session; an integer takes a draft subset
         structure, stimulus = "VISp", "spontaneous"
@@ -653,7 +653,7 @@ begin
     end
 
 
-    outpath = datadir("WRExperiment.jld2")
+    outpath = rootdatadir("WRExperiment.jld2")
     mkpath(dirname(outpath))
     @info "Saving all plot data to $outpath"
 
