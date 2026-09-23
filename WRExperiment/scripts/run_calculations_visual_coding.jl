@@ -1,6 +1,6 @@
 #! /bin/bash
 #=
-exec julia +1.12 -t auto "${BASH_SOURCE[0]}" "$@"
+exec julia +1.13 -t auto "${BASH_SOURCE[0]}" "$@"
 =#
 # Per-(session, structure) calculations for the Allen Visual Coding cohorts, the second data source
 # behind Figure S1. This is `run_calculations.jl` with a different session list and output

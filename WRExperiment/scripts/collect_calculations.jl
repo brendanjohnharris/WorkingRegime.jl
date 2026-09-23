@@ -1,6 +1,6 @@
 #! /bin/bash
 #=
-exec julia +1.12 -t auto "${BASH_SOURCE[0]}" "$@"
+exec julia +1.13 -t auto "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 DrWatson.quickactivate("WRExperiment")

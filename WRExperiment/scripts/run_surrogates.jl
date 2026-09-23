@@ -1,6 +1,6 @@
 #! /bin/bash
 #=
-exec julia +1.12 -t auto "${BASH_SOURCE[0]}" "$@"
+exec julia +1.13 -t auto "${BASH_SOURCE[0]}" "$@"
 =#
 # Surrogate nulls for the two quoted LFP statistics (per-channel excess kurtosis and diffusion
 # exponent), one file per (session, stimulus, structure). Default null is FT, whose increments are
@@ -63,7 +63,7 @@ if !isempty(params)
             WRExperiment.submit_calculations(
                 batch, mem = 32, ncpus = 4,
                 walltime = 4, # array elements are single conditions, a few minutes at 4 threads
-                exeflags = `+1.12 -t auto`,
+                exeflags = `+1.13 -t auto`,
                 queue = iseven(i) ? `taiji` : `defaultQ` # alternate queues for ~2x concurrency
             )
         end

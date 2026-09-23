@@ -41,7 +41,7 @@ export structures, layers, PTHR, hierarchy_scores, bootstrapmedian, val_to_strin
     unitids, VISUAL_CODING_FC, VISUAL_CODING_BO, VISUAL_CODING_STIMULUS, visual_coding_sessions,
     visual_coding_calcdir
 
-function submit_calculations(exprs; queue = ``, mem = 50, ncpus = 8, walltime = 8, exeflags = `+1.12`)
+function submit_calculations(exprs; queue = ``, mem = 50, ncpus = 8, walltime = 8, exeflags = `+1.13`)
     exprs = deepcopy(exprs)
     return if length(exprs) > 2
         shuffle!(exprs) # ? Shuffle so restarted calcs are more even

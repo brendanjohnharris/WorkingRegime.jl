@@ -1,7 +1,7 @@
 #! /bin/bash
 # -*- mode: julia -*-
 #=
-exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
+exec julia +1.13 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 # Supplementary figure: the Allen Visual Coding functional-connectivity cohort, shown in the same
 # panels the main figures use for Visual Behaviour, so the two datasets can be read against each

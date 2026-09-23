@@ -45,7 +45,7 @@ JLD2 = "0.6"
 MoreMaps = "0.3, 0.4"
 TimeseriesMakie = "0.2.2, 0.3"
 TimeseriesTools = "0.8, 0.9"
-julia = "1.12"
+julia = "1.13"
 
 [extras]
 AllenNeuropixelsBase = "0b0e28cf-a3af-44db-8bea-1c4507018d35"

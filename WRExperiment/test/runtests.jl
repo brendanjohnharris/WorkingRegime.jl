@@ -1,7 +1,7 @@
 #! /bin/bash
 # -*- mode: julia -*-
 #=
-exec julia +1.12 --project="$(dirname "${BASH_SOURCE[0]}")/.." "${BASH_SOURCE[0]}" "$@"
+exec julia +1.13 --project="$(dirname "${BASH_SOURCE[0]}")/.." "${BASH_SOURCE[0]}" "$@"
 =#
 # `sessionkendall` and its two call-site helpers. `src/SessionKendall.jl` is included directly
 # rather than through `using WRExperiment`: the estimator depends only on Statistics, Random and

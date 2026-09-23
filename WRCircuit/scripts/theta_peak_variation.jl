@@ -1,7 +1,7 @@
 #! /bin/bash
 # -*- mode: julia -*-
 #=
-exec julia +1.12 --handle-signals=yes -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
+exec julia +1.13 --handle-signals=yes -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 # Theta-peak variation --- how the SLOW LFP peak moves with the adaptation conductance Δg_K.
 #

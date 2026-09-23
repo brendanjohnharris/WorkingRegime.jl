@@ -1,6 +1,6 @@
 #! /bin/bash
 #=
-exec julia +1.12 --project="$(dirname "${BASH_SOURCE[0]}")/../.." "${BASH_SOURCE[0]}" "$@"
+exec julia +1.13 --project="$(dirname "${BASH_SOURCE[0]}")/../.." "${BASH_SOURCE[0]}" "$@"
 =#
 # Asserts that the LFP channel axis lines up with its labels, against the only reference that does
 # not share the read pipeline: the NWB file itself. The ElectricalSeries electrode region is the

@@ -5,9 +5,9 @@ WorkingRegime.jl reproduces the analyses and figures of the working-regime study
 
 # Setup
 
-The scripts need Julia 1.12, which they call as `julia +1.12` through [juliaup](https://github.com/JuliaLang/juliaup). From the repository root:
+The scripts need Julia 1.13, which they call as `julia +1.13` through [juliaup](https://github.com/JuliaLang/juliaup). From the repository root:
 ```bash
-julia +1.12 --project -e 'using Pkg; Pkg.instantiate()'
+julia +1.13 --project -e 'using Pkg; Pkg.instantiate()'
 ```
 `Pkg.instantiate()` resolves and installs the root project and all three workspace members, which share one `Manifest.toml`.
 

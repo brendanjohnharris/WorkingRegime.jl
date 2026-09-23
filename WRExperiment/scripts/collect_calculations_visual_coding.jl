@@ -1,6 +1,6 @@
 #! /bin/bash
 #=
-exec julia +1.12 -t auto "${BASH_SOURCE[0]}" "$@"
+exec julia +1.13 -t auto "${BASH_SOURCE[0]}" "$@"
 =#
 # Everything Figure S1 draws, assembled from `run_calculations_visual_coding.jl`'s per-block output
 # into one file that `scripts/FigS1_visual_coding.jl` reads. Same division of labour as Visual

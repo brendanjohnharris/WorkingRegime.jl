@@ -1,6 +1,6 @@
 #! /bin/bash
 #=
-exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
+exec julia +1.13 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
 @quickactivate :WRExperiment
