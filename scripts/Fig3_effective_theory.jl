@@ -7,6 +7,7 @@ using DrWatson
 @quickactivate "WorkingRegime"
 using CairoMakie
 using Fathom
+using Printf
 using Rsvg # activates FathomRsvgExt, so `svgimage!` draws true vector graphics
 using TimeseriesTools
 using Statistics
@@ -14,6 +15,7 @@ using DelimitedFiles
 import StatsBase
 
 set_theme!(Fathom.fathom())
+include(joinpath(@__DIR__, "mathlabels.jl")) # mit/unitlabel: symbols in the equation face
 
 begin # * Options
     NAME = "Fig3_effective_theory"
@@ -56,8 +58,8 @@ begin # * Render
     g_input = gtop[1, 2] = GridLayout()
     begin # * Panel b --- membrane potential
         ax = Axis(
-            g_input[1, 1]; title = "Membrane potential", xlabel = "Time (s)",
-            ylabel = "𝑉 (mV)", limits = (nothing, (-71, -49)),
+            g_input[1, 1]; title = "Membrane potential", xlabel = unitlabel("Time", "s"),
+            ylabel = unitlabel(mit("V"), "mV"), limits = (nothing, (-71, -49)),
             yticks = WilkinsonTicks(4; k_max = 5)
         )
         hlines!(ax, [-50]; color = bermejo)
@@ -66,16 +68,18 @@ begin # * Render
         V_trace = sol[1:10000, 1]
         times(V_trace) .-= first(times(V_trace))
         lines!(ax, V_trace; linewidth = 2)
-        axislegend(
-            ax, [LineElement(color = :transparent, linestyle = nothing)],
-            [L"\nu \approx %$(round(fr, digits = 1)) \textrm{ Hz }"];
-            position = :rb, framevisible = true, patchsize = (0.1, 0.1)
+        # Drawn in the axis rather than boxed in a legend, as Fig 1 (e) draws the same annotation;
+        # glowed because the trace spikes through the corner it sits in.
+        text!(
+            ax, 0.97, 0.06; text = rich(mit("ν"), @sprintf(" ≈ %.1f Hz", fr)),
+            space = :relative, align = (:right, :bottom), fontsize = 16,
+            glowcolor = :white, glowwidth = 12
         )
     end
     begin # * Panel c --- voltage density
         ax = Axis(
-            g_input[1, 2]; title = "Density", titlealign = :right, # narrow panel: clear the letter
-            xlabel = "𝑉 (mV)", ylabel = "PDF",
+            g_input[1, 2]; title = "Potential", titlealign = :right, # narrow panel: clear the letter
+            xlabel = unitlabel(mit("V"), "mV"), ylabel = "Density",
             yticks = WilkinsonTicks(2), xticks = WilkinsonTicks(3),
             limits = ((-70, -50), nothing)
         )
@@ -83,8 +87,8 @@ begin # * Render
     end
     begin # * Panel d --- input current
         ax = Axis(
-            g_input[2, 1]; title = "Input current", xlabel = "Time (s)",
-            ylabel = "𝐼 (nA)", limits = (nothing, (-2, 5)),
+            g_input[2, 1]; title = "Input current", xlabel = unitlabel("Time", "s"),
+            ylabel = unitlabel(mit("I"), "nA"), limits = (nothing, (-2, 5)),
             yticks = WilkinsonTicks(3; k_max = 4)
         )
         I_trace = input_sol[1:5000, 1]
@@ -96,8 +100,8 @@ begin # * Render
         steps = abs.(diff(input_sol[1:10:end, 1]))
         ax = Axis(
             g_input[2, 2]; title = "Step sizes", titlealign = :right, # narrow panel: clear the letter
-            xlabel = "|Δ𝐼| (nA)",
-            ylabel = "Frequency", xscale = log10, yscale = log10,
+            xlabel = unitlabel(mit("|ΔI|"), "nA"),
+            ylabel = "Density", xscale = log10, yscale = log10,
             xticks = WilkinsonTicks(4; k_max = 4) |> LogTicks,
             yticks = WilkinsonTicks(4; k_max = 4) |> LogTicks
         )
@@ -107,15 +111,15 @@ begin # * Render
 
     begin # * Panel f --- firing-rate phase diagram
         ax = Axis(
-            gbot[1, 1]; title = "Firing rate (Hz)", xlabel = "α", ylabel = "β",
-            backgroundcolor = :gray88
+            gbot[1, 1]; title = "Firing rate (Hz)", xlabel = mit("α"), ylabel = mit("β"),
+            backgroundcolor = :gray88, limits = ((1.2, 2.0), (0.2, 1.0)) # the same window as (h)
         )
         p = contourf!(
             ax, rates_αβ; colormap = seethrough(:turbo),
             nan_color = :lightgray, levels = 11
         )
         Colorbar(gbot[1, 2], p)
-        Label(gbot[1, 2, Top()], L"\nu"; valign = :bottom, halign = :center)
+        Label(gbot[1, 2, Top()], mit("ν"); valign = :bottom, halign = :center)
     end
     begin # * Panel g --- Fano factor curves at the working regime
         fano_slice(_β, _γ) = mfanos[α = Near(α), β = Near(_β), η = At(η), γ = At(_γ)]
@@ -126,18 +130,19 @@ begin # * Render
         ]
         ax = Axis(
             gbot[1, 3]; xscale = log10, yscale = log10, title = "Fano factor",
-            xlabel = "Time bin (s)", limits = ((1.0e-3, 1.0e0), nothing),
+            xlabel = unitlabel("Time lag", "s"), ylabel = "Fano factor",
+            limits = ((1.0e-3, 1.0e0), nothing),
             xticks = LogTicks(WilkinsonTicks(4))
         )
         for (label, curve) in fano_curves
-            lines!(ax, curve; label)
+            lines!(ax, curve; label = mathify(label)) # plain names stay for the source data
         end
         axislegend(ax; position = :lt, patchsize = (10, 10))
     end
     begin # * Panel h --- variability exponent phase diagram
         colorrange = (0.0, 0.6)
         ax = Axis(
-            gbot[1, 4]; title = "Variability", xlabel = "α", ylabel = "β",
+            gbot[1, 4]; title = "Variability", xlabel = mit("α"), ylabel = mit("β"),
             backgroundcolor = :gray88, limits = ((1.2, 2.0), (0.2, 1.0))
         )
         # extend both ends, or out-of-range cells are left unfilled and show the axis background,
@@ -150,7 +155,7 @@ begin # * Render
             levels = range(colorrange...; length = 11), extendhigh = :auto, extendlow = :auto
         )
         Colorbar(gbot[1, 5], p; ticks = WilkinsonTicks(4; k_max = 4, k_min = 3))
-        Label(gbot[1, 5, Top()], L"c"; valign = :bottom, halign = :center)
+        Label(gbot[1, 5, Top()], mit("c"); valign = :bottom, halign = :center)
     end
 
     # The schematic is aspect-locked (1.31 wide) and width-limited, so its size is set by this
@@ -161,8 +166,12 @@ begin # * Render
         [
             gtop[1, 1], g_input[1, 1], g_input[1, 2], g_input[2, 1], g_input[2, 2],
             gbot[1, 1], gbot[1, 3], gbot[1, 4],
-        ], f; fontsize = 16,
-        dx = [40, 0, 0, 0, 0, 0, 0, 0] # (a)'s cell reaches off-page (schematic Outside); pull the letter back on, short of the title
+        ], f;
+        # (a)'s cell reaches off-page (schematic `Outside`); pull the letter back on, short of the
+        # title. (c) and (e) are the narrow panels: their right-aligned titles still ran into the
+        # letters by 12 and 16, so both are pulled left to a 12-unit clearance (measured as title
+        # left edge minus letter right edge, as in Figs 1 and 2).
+        dx = [40, 0, -24, 0, -29, 0, 0, 0]
     )
     display(f)
 end

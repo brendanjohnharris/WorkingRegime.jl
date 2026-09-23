@@ -23,6 +23,7 @@ using DelimitedFiles
 include(projectdir("WRExperiment", "src", "SessionKendall.jl"))
 
 set_theme!(fathom())
+include(joinpath(@__DIR__, "mathlabels.jl")) # mit/unitlabel/mathify: symbols in the equation face
 
 const structures = ["VISp", "VISl", "VISrl", "VISal", "VISpm", "VISam"]
 const hierarchy_scores = Dict(
@@ -345,19 +346,25 @@ end
 const region_colors = cgrad(binarysunset, length(structures); categorical = true)
 const structure_color = Dict(s => region_colors[i] for (i, s) in enumerate(structures))
 const HEATMAP = sunrise
-const δlab = "δ  (I:E ratio)"
+# One rich form per symbol, so the axis label, the colorbar and the arrow tip cannot disagree.
+const δsym = mit("δ")
+const gksym = rich(mit("Δg"), subscript(mit("K")))
+const asym = mit("a")
+const bsym = mit("b")
+const δlab = unitlabel(δsym, "I:E ratio")
 # µS, not mS/cm²: the model is a point neuron, `C dV/dt = -gL(V - VL) - gK(V - VK) + I` with V in mV
 # and I in nA, so conductances are nA/mV = µS (C = 0.25 nF, gL = 0.0167 µS give τm = 15 ms).
-const gklab = "Δg_K  (µS)"
+const gklab = unitlabel(gksym, "µS")
 
+# `(key, label, direction, colour)`: the key names the knob in the source data, the label draws it.
 const ARROWS = SHOW_CIRCUIT_ARROWS ? (
-        ("δ", δ_dir, qinghai),
-        ("Δg_K", gk_dir, seohae),
-        ("α", α_dir, baikal),
-        ("β", β_dir, bermejo),
+        ("δ", δsym, δ_dir, qinghai),
+        ("Δg_K", gksym, gk_dir, seohae),
+        ("α", mit("α"), α_dir, baikal),
+        ("β", mit("β"), β_dir, bermejo),
     ) : (
-        ("α", α_dir, baikal),
-        ("β", β_dir, bermejo),
+        ("α", mit("α"), α_dir, baikal),
+        ("β", mit("β"), β_dir, bermejo),
     )
 
 "Place `label` just past an arrow tip (`anchor + vec`), nudged ~14 px further
@@ -372,7 +379,7 @@ function label_tip!(ax, anchor, vec, label, color)
     )
 end
 
-function plot_hero!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1.0))
+function plot_ab_plane!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1.0))
     xs = [p.a for p in points]
     ys = [p.b for p in points]
 
@@ -397,7 +404,7 @@ function plot_hero!(ax, points; arrow_offset = (0.0, 0.0), axis_ranges = (1.0, 1
 
     # All the arrows share the origin: circuit knobs (δ, Δg_K) in green/orange, bFNS orders in
     # blue/red. `ARROWS` holds the raw displacements; `scaled` is display normalisation only.
-    for (label, raw, color) in ARROWS
+    for (_, label, raw, color) in ARROWS
         v = scaled(raw)
         arrows2d!(
             ax, [Point2f(ox, oy)], [Vec2f(v...)];
@@ -466,7 +473,7 @@ begin # * Top left — the visual cortical areas, coloured by hierarchy position
     )
     W, H = Fathom.svgsize(svg)
 
-    ax_map = Axis(g_cortex[1, 1]; aspect = DataAspect(), title = "Visual cortex",
+    ax_map = Axis(g_cortex[1, 1]; aspect = DataAspect(), title = "Mouse visual cortex",
                   halign = :left) # letterboxes in its cell; hug the page edge
     hidedecorations!(ax_map)
     hidespines!(ax_map)
@@ -515,11 +522,14 @@ begin # * Top left — (a, b) plane at L2/3
         scatterlimits[2][2] - scatterlimits[2][1],
     )
     ax_l23 = Axis(
-        gs[1][1, 1]; xlabel = "Diffusion exponent  a",
-        ylabel = "Spectral exponent  b",
-        title = "$stim, $(layer_names[2])", limits = scatterlimits
+        gs[1][1, 1]; xlabel = rich("Diffusion exponent ", asym),
+        ylabel = rich("Spectral exponent ", bsym),
+        # The layer comes from `layer_names` rather than being spelled out, so the title cannot
+        # drift from the data. The stimulus ($stim) lives in the caption and in `statistics.tsv`.
+        # "Hierarchical" overflowed the ~190-unit panel and ran into (c)'s letter; "Hierarchy" fits.
+        title = "Hierarchy exponents ($(layer_names[2]))", limits = scatterlimits
     )
-    plot_hero!(ax_l23, points_l23; axis_ranges = aranges)
+    plot_ab_plane!(ax_l23, points_l23; axis_ranges = aranges)
 end
 
 begin # * Top right — hierarchy correlation of each exponent, by layer
@@ -576,9 +586,9 @@ begin # * Top right — hierarchy correlation of each exponent, by layer
     end
 
     ax_τ = Axis(
-        gs[2][1, 1]; xlabel = "Kendall's 𝜏", ylabel = "Cortical layer",
+        gs[2][1, 1]; xlabel = rich("Kendall's ", mit("τ")), ylabel = "Cortical layer",
         yticks = (collect(τ_layers), [layer_names[l] for l in τ_layers]),
-        title = "Hierarchy correlation", yreversed = true,
+        title = "Hierarchical correlation", yreversed = true,
         # The full range of 𝜏, so the per-session strip is not clipped: a six-area session can
         # reach ±1, and 34 of the 772 drawn values sit beyond ±0.85.
         xticks = -1:0.5:1,
@@ -593,6 +603,7 @@ begin # * Top right — hierarchy correlation of each exponent, by layer
     # zero-width whisker looking like a typo. Seeded, so the jitter is the same on every rerun.
     τ_jitter = Random.MersenneTwister(7)
     for (sym, color) in τ_series
+        symlab = mit(sym) # one object, reused: `merge = true` pairs the legend entries by equality
         cells = [c for c in τ_cells if c.sym == sym]
         isempty(cells) && continue
         for c in cells
@@ -612,10 +623,10 @@ begin # * Top right — hierarchy correlation of each exponent, by layer
         sig = [c.padj < PTHR for c in cells]
         lines!(ax_τ, ms, ys; color = (color, 0.4), linewidth = 1.5)
         rangebars!(ax_τ, ys, los, his; direction = :x, color, linewidth = 1.5, whiskerwidth = 6)
-        scatter!(ax_τ, ms[sig], ys[sig]; color, markersize = 10, label = sym)
+        scatter!(ax_τ, ms[sig], ys[sig]; color, markersize = 10, label = symlab)
         any(.!sig) && scatter!(
             ax_τ, ms[.!sig], ys[.!sig]; color = :transparent, strokecolor = color,
-            strokewidth = 1, markersize = 10, label = sym
+            strokewidth = 1, markersize = 10, label = symlab
         )
     end
     axislegend(ax_τ; position = :rb, framevisible = false, merge = true, patchsize = (10, 10))
@@ -656,10 +667,12 @@ end
 
 begin # * Bottom row — circuit exponents against δ, one line per Δg_K
     ax_dg_a = circuit_lines!(
-        gs[3], _A_dg_full; ylabel = "Diffusion exponent  a", title = "Circuit:  a vs δ"
+        gs[3], _A_dg_full; ylabel = rich("Diffusion exponent ", asym),
+        title = "Circuit diffusion variation"
     )
     ax_dg_b = circuit_lines!(
-        gs[4], _B_dg_full; ylabel = "Spectral exponent  b", title = "Circuit:  b vs δ"
+        gs[4], _B_dg_full; ylabel = rich("Spectral exponent ", bsym),
+        title = "Circuit spectral variation"
     )
 end
 
@@ -668,7 +681,7 @@ end
 
 One tab-separated file per panel in `outdir`, holding exactly the values that panel draws. Display
 encodings are left out (colours, marker sizes, filled-vs-open significance, and the arrows'
-display-normalised length, which is discarded by `plot_hero!` anyway). The arrows' raw `(Δa, Δb)`
+display-normalised length, which is discarded by `plot_ab_plane!` anyway). The arrows' raw `(Δa, Δb)`
 displacements ARE kept: they are the panel's quantitative claim and are recoverable from no other
 file. Reuses the objects the figure was drawn from, so the files cannot drift from the panels.
 """
@@ -696,8 +709,8 @@ function save_source_data()
             reduce(
                 vcat,
                 [
-                    permutedims([lab, ARROW_ORIGIN[1], ARROW_ORIGIN[2], v[1], v[2]])
-                        for (lab, v, _) in ARROWS
+                    permutedims([key, ARROW_ORIGIN[1], ARROW_ORIGIN[2], v[1], v[2]])
+                        for (key, _, v, _) in ARROWS
                 ]
             )
         ), '\t'
@@ -874,7 +887,9 @@ end
 # Taller top row: the map is aspect-locked, so its size is set by the row height, and the extra
 # height also squares up (b) and (c), which were landscape at the default even split.
 rowsize!(f.layout, 1, Relative(0.55))
-addlabels!([gtop[1, 1], gtop[1, 2], gtop[1, 3], f[2, 1], f[2, 2]], f)
+# (b)'s title overhangs its panel by 12 each side, leaving (c)'s letter only 5 units of clearance
+# while (c)'s own title has 37 to spare; split the difference.
+addlabels!([gtop[1, 1], gtop[1, 2], gtop[1, 3], f[2, 1], f[2, 2]], f; dx = [0, 0, 8, 0, 0])
 display(f)
 outfile = joinpath(outdir, "$NAME.pdf")
 wsave(outfile, f)

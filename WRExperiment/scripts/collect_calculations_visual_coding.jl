@@ -47,8 +47,10 @@ FFTW.set_num_threads(1)   # see fftw-threads-segfault
 LinearAlgebra.BLAS.set_num_threads(1)
 
 const COHORT = isempty(ARGS) ? :functional_connectivity :
-    (lowercase(ARGS[1]) in ("bo", "brain_observatory") ? :brain_observatory :
-     :functional_connectivity)
+    (
+        lowercase(ARGS[1]) in ("bo", "brain_observatory") ? :brain_observatory :
+        :functional_connectivity
+    )
 const TAG = COHORT === :brain_observatory ? "bo" : "fc"
 const CALCDIR = visual_coding_calcdir(COHORT)
 const STIM = VISUAL_CODING_STIMULUS
@@ -78,16 +80,22 @@ function loadblocks(path)
             false
         end
         ok == 0 && continue
-        f = savepath(Dict("sessionid" => sessionid, "stimulus" => STIM,
-                "structure" => structure), "jld2", path)
+        f = savepath(
+            Dict(
+                "sessionid" => sessionid, "stimulus" => STIM,
+                "structure" => structure
+            ), "jld2", path
+        )
         isfile(f) || continue
         d = jldopen(f, "r") do fl
             haskey(fl, "error") && return nothing
             # Units come off here, not downstream: the spectrum carries V²·s, and the figure
             # script runs in the root project, which does not depend on Unitful.
             mad = ustripall(fl["mad"])
-            (; mad, S = ustripall(fl["S"]), coeffs = fl["coeffs"], chi = fl["chi"],
-                layers = channellayers(mad), unitdepths = fl["unitdepths"])
+            (;
+                mad, S = ustripall(fl["S"]), coeffs = fl["coeffs"], chi = fl["chi"],
+                layers = channellayers(mad), unitdepths = fl["unitdepths"],
+            )
         end
         isnothing(d) || (D[(sessionid, structure)] = d)
     end
@@ -100,7 +108,7 @@ to one `structure` when given; pooled over all of them otherwise.
 """
 function layercurve(blocks, field, layernum; structure = nothing)
     sel_blocks = isnothing(structure) ? collect(values(blocks)) :
-                 [v for (k, v) in blocks if last(k) == structure]
+        [v for (k, v) in blocks if last(k) == structure]
     cs = map(sel_blocks) do d
         sel = findall(==(layernum), d.layers)
         length(sel) < MIN_CHANNELS && return nothing
@@ -116,7 +124,7 @@ end
 "Median Fano curve over one layer's units within each block, then the median across blocks."
 function fanolayercurve(blocks, layernum, ftaus; structure = nothing)
     sel_blocks = isnothing(structure) ? collect(values(blocks)) :
-                 [v for (k, v) in blocks if last(k) == structure]
+        [v for (k, v) in blocks if last(k) == structure]
     cs = map(sel_blocks) do d
         M = unitfano(d, layernum, ftaus)
         isnothing(M) && return nothing
@@ -177,8 +185,10 @@ function variabilitymatrix(blocks, sessions, layernum, ftaus)
     # flattens the two axes into one map, so the result comes back shaped (session, structure).
     # `variability_exponent` reseeds the task-local RNG on entry, so its multistart draws are the
     # same whichever task runs the fit and the matrix matches the serial one exactly.
-    Y = map(Chart(LogLogger(), Threaded()),
-        collect(Iterators.product(eachindex(sessions), eachindex(structures)))) do (i, j)
+    Y = map(
+        Chart(LogLogger(), Threaded()),
+        collect(Iterators.product(eachindex(sessions), eachindex(structures)))
+    ) do (i, j)
         s, st = sessions[i], structures[j]
         haskey(blocks, (s, st)) || return NaN
         M = unitfano(blocks[(s, st)], layernum, ftaus)
@@ -191,12 +201,14 @@ function variabilitymatrix(blocks, sessions, layernum, ftaus)
 end
 
 # ---------------------------------------------------------------------------- assemble
-curves, _ = produce_or_load(Dict(), DrWatson.datadir();
-    filename = savepath("visual_coding_$(TAG)")) do _
+curves, _ = produce_or_load(
+    Dict(), DrWatson.datadir();
+    filename = savepath("visual_coding_$(TAG)")
+) do _
     blocks = loadblocks(CALCDIR)
     isempty(blocks) && error("no completed blocks in $(CALCDIR); run run_calculations_visual_coding.jl")
     sessions = sort(unique(first.(keys(blocks))))
-    @info "collected" cohort=COHORT blocks=length(blocks) sessions=length(sessions)
+    @info "collected" cohort = COHORT blocks = length(blocks) sessions = length(sessions)
 
     ref = first(values(blocks))
     taus = collect(lookup(ref.mad, 1))
@@ -217,22 +229,26 @@ curves, _ = produce_or_load(Dict(), DrWatson.datadir();
     B = Dict(l => exponentmatrix(blocks, sessions, :b, l) for l in LAYERNUMS)
     C = Dict(l => variabilitymatrix(blocks, sessions, l, ftaus) for l in TAULAYERS)
 
-    return Dict("cohort" => string(COHORT), "sessions" => sessions, "structures" => structures,
+    return Dict(
+        "cohort" => string(COHORT), "sessions" => sessions, "structures" => structures,
         "layernums" => LAYERNUMS, "layernames" => LAYERNAMES, "taulayers" => TAULAYERS,
         "taus" => taus, "freqs" => fr, "fano_taus" => ftaus,
         "mad_layer" => mad_layer, "psd_layer" => psd_layer, "fano_layer" => fano_layer,
         "mad_visp" => mad_visp, "psd_visp" => psd_visp, "fano_visp" => fano_visp,
         "a" => A, "b" => B, "c" => C,
-        "hierarchy" => hvec, "nblocks" => length(blocks))
+        "hierarchy" => hvec, "nblocks" => length(blocks)
+    )
 end
 
 # ---------------------------------------------------------------------------- increment histogram
 # A second LFP pass, cached separately so it is not repeated when the curves above are recomputed.
-# Mirrors `increment_histograms.jl` (the Visual Behaviour version) exactly: each channel's increments
+# Mirrors the Visual Behaviour version exactly: each channel's increments
 # are standardised by their own SD before pooling, and one Fourier-transform surrogate per channel
 # gives the Gaussian null empirically alongside the analytic one.
-increments, _ = produce_or_load(Dict(), DrWatson.datadir();
-    filename = savepath("visual_coding_increments_$(TAG)")) do _
+increments, _ = produce_or_load(
+    Dict(), DrWatson.datadir();
+    filename = savepath("visual_coding_increments_$(TAG)")
+) do _
     counts, counts_surr = zeros(Int, length(EDGES) - 1), zeros(Int, length(EDGES) - 1)
     kurt, kurt_surr, kurt_sess, kurt_sess_surr = Float64[], Float64[], Float64[], Float64[]
     nchan = 0
@@ -240,11 +256,21 @@ increments, _ = produce_or_load(Dict(), DrWatson.datadir();
         @info "[$i] increments, session $sessionid"
         try
             session = AN.Session(sessionid)
-            LFP = formatlfp(session; epoch = :longest, band = (1.0e-3, 1.0e-2),
-                pass = (1, 625), stimulus = STIM, structure = "VISp")   # tolerance ladder
+            LFP = formatlfp(
+                session; epoch = :longest, band = (1.0e-3, 1.0e-2),
+                pass = (1, 625), stimulus = STIM, structure = "VISp"
+            )   # tolerance ladder
             X = Float64.(parent(ustripall(LFP)))
-            lnum = parselayernum.(String.(last(AN.getchannellayers(session,
-                collect(lookup(LFP, AN.Chan))))))
+            lnum = parselayernum.(
+                String.(
+                    last(
+                        AN.getchannellayers(
+                            session,
+                            collect(lookup(LFP, AN.Chan))
+                        )
+                    )
+                )
+            )
             length(lnum) == size(X, 2) || (@warn "channel/layer length mismatch, skipping"; continue)
             k_this, ks_this = Float64[], Float64[]
             for j in findall(==(2), lnum)          # L2/3
@@ -265,12 +291,14 @@ increments, _ = produce_or_load(Dict(), DrWatson.datadir();
         end
     end
     density(c) = c ./ (sum(c) * step(EDGES))
-    return Dict("centres" => collect(EDGES)[1:(end - 1)] .+ step(EDGES) / 2,
+    return Dict(
+        "centres" => collect(EDGES)[1:(end - 1)] .+ step(EDGES) / 2,
         "density" => density(counts), "density_surrogate" => density(counts_surr),
         "counts" => counts, "counts_surrogate" => counts_surr,
         "kurtosis" => kurt, "kurtosis_surrogate" => kurt_surr,
         "kurtosis_session" => kurt_sess, "kurtosis_surrogate_session" => kurt_sess_surr,
-        "nchannels" => nchan, "structure" => "VISp", "stimulus" => STIM)
+        "nchannels" => nchan, "structure" => "VISp", "stimulus" => STIM
+    )
 end
 
-@info "done" curves=DrWatson.datadir("visual_coding_$(TAG).jld2") increments=DrWatson.datadir("visual_coding_increments_$(TAG).jld2") nblocks=curves["nblocks"] nchannels=increments["nchannels"]
+@info "done" curves = DrWatson.datadir("visual_coding_$(TAG).jld2") increments = DrWatson.datadir("visual_coding_increments_$(TAG).jld2") nblocks = curves["nblocks"] nchannels = increments["nchannels"]

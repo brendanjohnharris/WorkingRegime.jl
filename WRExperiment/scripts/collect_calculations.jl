@@ -73,16 +73,6 @@ begin # * Example LFP trace + spike raster (Fig 1b)
 end
 
 begin # * Pooled L2/3 increment distribution against its FT surrogate null (Fig 1, far right)
-    # Each channel's increments are standardised by their own standard deviation before pooling, so
-    # channels and sessions of different amplitude contribute on equal terms and the pooled curve is
-    # directly comparable to a standard Gaussian. One FT surrogate per channel is histogrammed
-    # alongside: phase randomisation leaves Gaussian increments, so the surrogate curve gives the null
-    # empirically as well as analytically. Serial --- Allen access goes through PythonCall.
-    #
-    # DUPLICATE OF `WRExperiment/scripts/increment_histograms.jl`, which writes this same cache
-    # standalone. `produce_or_load` fires only when the file is absent, so whichever path runs first
-    # wins; the two must stay in sync (better: consolidate them) or deleting the cache silently
-    # reverts the sample and the aggregation behind the Fig 1c annotation.
     increment_histograms, _ = produce_or_load(
         Dict(), DrWatson.datadir(); filename = savepath("increment_histograms")
     ) do _

@@ -20,11 +20,21 @@ using Printf
 import ImageMagick # rasterises brain.pdf in pdfpanel!
 
 set_theme!(Fathom.fathom())
+include(joinpath(@__DIR__, "mathlabels.jl")) # mit/mrm/unitlabel: symbols in the equation face
 
 const NAME = "Fig1_combined_curves"
 const outdir = plotsdir(NAME)
 const STIM = "spontaneous"
 const experiment_color = :cornflowerblue
+# (d)'s title is a `Label`, not an `Axis` title; match whatever the theme sets for titles.
+const TITLESIZE = to_value(Makie.current_default_theme()[:Axis][:titlesize])
+# Where the blue probe of `brain.pdf` meets the cortical surface, in the coordinates the panel
+# plots. Found by isolating strongly saturated blue pixels (HSV hue 200-250, s > 0.45, v > 0.35)
+# and walking down to the first row adjacent to the TEAL slabs, which are the visual areas: (row
+# 227, col 448) of a 1375x1767 image. Testing against the brain silhouette instead lands ~90 rows
+# too high, because the probes are bundled closely enough up there to shade each other.
+# `pdfpanel!` draws `rotr90(img)` mirrored in x, which sends (r, c) to (W + 1 - c, H + 1 - r).
+const BRAIN_PROBE = (1767 + 1 - 448, 1375 + 1 - 227)
 const circuit_color = :crimson
 
 mkpath(outdir)
@@ -54,7 +64,7 @@ BEFORE reading, since a bare `FileIO.load` renders PDFs at 72 dpi. MakieTeX's `P
 keep the artwork vector, but its newest release (0.4.3) pins Makie 0.21 against this project's
 0.24, so it cannot resolve here; the brain render is embedded raster anyway, so nothing is lost.
 """
-function pdfpanel!(gp, pdf; dpi = 600)
+function pdfpanel!(gp, pdf; dpi = 600, flipx = false, kwargs...)
     png = datadir(first(splitext(basename(pdf))) * ".png")
     if !isfile(png) || mtime(png) < mtime(pdf)
         wand = ImageMagick.MagickWand()
@@ -65,10 +75,17 @@ function pdfpanel!(gp, pdf; dpi = 600)
         ImageMagick.readimage(wand, pdf)
         ImageMagick.writeimage(wand, png)
     end
-    ax = Axis(gp; aspect = DataAspect())
-    hidedecorations!(ax)
+    ax = Axis(gp; aspect = DataAspect(), kwargs...)
+    hidedecorations!(ax)   # leaves the title, which is not a decoration
     hidespines!(ax)
-    image!(ax, rotr90(wload(png)))
+    # The PDF rasterises onto an opaque white page; clear that background, or the panel reads as
+    # a white slab inside the tinted group box. The cut is clean: 27% of pixels are pure white
+    # and almost nothing falls between 0.98 and 1, so the mesh survives untouched.
+    img = map(wload(png)) do c
+        min(c.r, c.g, c.b) >= 0.999 ? RGBAf(0, 0, 0, 0) : RGBAf(c.r, c.g, c.b, c.alpha)
+    end
+    m = rotr90(img)
+    image!(ax, flipx ? m[end:-1:1, :] : m)
     return ax
 end
 
@@ -118,14 +135,43 @@ function track_com(field)
 end
 
 gaussian(x) = exp(-x^2 / 2) / sqrt(2π)
-normalise(x) = (x .- minimum(x)) ./ (maximum(x) - minimum(x))
+"""
+    logshift(y, ref)
 
-"Map `y` into the log-space min-max frame of the drawn curve `ref`, so a fit overlays
-`exp10.(normalise(log10.(ref)))` with its position and log-log slope relative to that curve intact."
-lognorm(y, ref) = exp10.(
-    (log10.(y) .- minimum(log10.(ref))) ./
-        (maximum(log10.(ref)) - minimum(log10.(ref)))
-)
+`y` translated in log space so that `ref`'s minimum sits at 1. A pure translation: every log-log
+slope survives it, so curves from different sources overlay in one frame and can be compared by eye.
+
+This replaces a min-max normalisation, which divided each curve's log values by that curve's OWN log
+range and so scaled its slopes by a different factor per curve. Under it the two MAD fits, both
+a = 0.61, drew at 1.11 and 0.83 (log ranges 0.55 and 0.74), and neither drew at 0.61. Passing a bare
+power law `f^b` through it was worse still: the divisor is then `|b| * log10(fmax/fmin)`, `b`
+cancels, and every guide draws at `-1/log10(fmax/fmin)` whatever its exponent.
+
+Pass the same anchor for a curve and its error band, or the band shifts relative to the curve.
+"""
+logshift(y, at::Real) = exp10.(log10.(y) .- at)
+logshift(y, ref::AbstractVector) = logshift(y, minimum(log10.(ref)))   # anchor on `ref`'s minimum
+
+"`log10` of the curve `(x, y)` at `x0`, as a `logshift` anchor: shifts the curve through 1 at `x0`."
+logat(x, y, x0) = log10(y[argmin(abs.(log10.(x) .- log10(x0)))])
+
+"""
+    slopeguide!(ax, fx, fy, band, b, lift; kwargs...)
+
+A straight log-log guide of slope exactly `b`, spanning `band`, anchored to the drawn curve
+`(fx, fy)` at the band's LOWER edge and offset by the factor `lift` (`< 1` to sit below the curve).
+
+The anchor is the low edge rather than the band centre because these spectra are shallower over
+their fitted band than the fitted exponent itself (the experiment averages -1.46 over 3-500 Hz
+against a quoted -1.75, the peaks and the low arm pulling it up). A guide pinned at the centre
+therefore rises above the curve at low frequency; pinned at the low edge it stays below throughout.
+"""
+function slopeguide!(ax, fx, fy, band, b, lift; kwargs...)
+    x0 = first(band)
+    y0 = fy[argmin(abs.(log10.(collect(fx)) .- log10(x0)))]
+    x = exp10.(range(log10(first(band)), log10(last(band)); length = 64))
+    return lines!(ax, x, lift .* y0 .* (x ./ x0) .^ b; kwargs...)
+end
 
 # MAD exponents are re-fit here from the DISPLAYED (median) curves, mirroring each side's
 # calculation script (`diffusion_line`/`fit_mad`: 1 component, 0 peaks, log-weighted over the shared
@@ -194,7 +240,16 @@ const YSPACE_D = 30.0
 # of 1.5 nA peaking at 2.6 nA (a burstier window reached 4.2 nA and clipped the axis), with a path
 # length of 290 grid units. Computed here rather than inside the panel because the patch, the traced
 # neuron and the trace window are all defined from it.
-const FIELD_TINDEX = 42_571
+#
+# Re-picked by sweeping every window in the trace against both criteria at once, scoring the bump
+# against the patch centre each window implies (the patch follows the trajectory end, so a fixed
+# centre scores candidates wrongly). Only 21 windows are seam-free with >= 8 grid units of edge
+# clearance and a wide sweep; this one has the strongest bump among them. Against the stretch the
+# original search returned, the track is longer (extent 66 against 52 grid units, path 422 against
+# 289) and the bump is no longer invisible: mean input inside the patch 1.28 nA against 0.04
+# outside, where before it was 0.33 against 0.10. Landing on the field's rare flares instead gives
+# a far brighter bump but a short, tangled track --- the two maxima are anticorrelated.
+const FIELD_TINDEX = 41_921
 const FIELD_WINDOW = 1170
 const FIELD_STRIDE = 3
 const FIELD_FRAME, TRAJECTORY = let
@@ -230,14 +285,17 @@ const TRACED_NEURON = argmin(PATCH_DISTANCES)
 "LFP trace above its spike raster, sharing a time axis (Fig 1b)."
 function traces_panel!(gl, d)
     axl = Axis(
-        gl[1, 1]; ylabel = "LFP", yticks = ([], []), xticks = ([], []),
+        # Negative `ylabelpadding`: these axes have no tick labels, so the default padding leaves
+        # the ylabel floating well left of the spine, right where the (a) bracket lines arrive.
+        gl[1, 1]; ylabel = "LFP", ylabelpadding = -8, yticks = ([], []), xticks = ([], []),
         xgridvisible = false, limits = ((0, maximum(d["t"])), nothing),
         title = "Neuropixels recordings"
     )
     lines!(axl, d["t"], d["lfp"]; color = experiment_color, linewidth = 1.2)
 
     axr = Axis(
-        gl[2, 1]; ylabel = "Neuron", xlabel = "Time (s)", yticks = ([], []),
+        gl[2, 1]; ylabel = "Neuron", ylabelpadding = -8, xlabel = unitlabel("Time", "s"),
+        yticks = ([], []),
         xgridvisible = false, limits = ((0, maximum(d["t"])), nothing)
     )
     for (i, s) in enumerate(d["spikes"])
@@ -270,17 +328,23 @@ function increment_panel!(ax, d; showsurrogate = true, xlim = 7)
     x, y, ys = d["centres"], d["density"], d["density_surrogate"]
     if showsurrogate
         ks = (ys .> 0) .& (abs.(x) .<= xlim)
-        lines!(ax, x[ks], ys[ks]; color = (abyad, 0.9), linewidth = 1.2, label = "Surrogate")
+        lines!(ax, x[ks], ys[ks]; color = (abyad, 0.9), label = "Surrogate")
     end
     xg = range(-xlim, xlim, length = 400)
-    lines!(ax, xg, gaussian.(xg); color = chernoe, linestyle = :dash, linewidth = 1.5, label = "Gaussian")
+    lines!(ax, xg, gaussian.(xg); color = chernoe, linestyle = :dash, label = "Gaussian")
     keep = (y .> 0) .& (abs.(x) .<= xlim)
-    lines!(ax, x[keep], y[keep]; color = experiment_color, linewidth = 2, label = "Data")
+    lines!(ax, x[keep], y[keep]; color = experiment_color, label = "Data")
     text!(
-        ax, 0.04, 0.92; text = @sprintf("κ = %.2f", increment_kurtosis(d)), space = :relative,
-        align = (:left, :top), fontsize = 11, color = experiment_color
+        ax, 0.96, 0.92; text = rich(mit("κ"), @sprintf(" = %.2f", increment_kurtosis(d))), space = :relative,
+        align = (:right, :top), fontsize = 11, color = experiment_color
     )
-    ylims!(ax, 1.0e-6, 1.5)
+    # Compact, and the top limit lifted from 1.5: at the default size the first row sits on the
+    # peak, and the corners above a peaked density are the only free space in this panel.
+    axislegend(
+        ax; position = :lt, framevisible = false, labelsize = 11,
+        patchsize = (13, 8), rowgap = -2, padding = (2, 2, 0, 0)
+    )
+    ylims!(ax, 1.0e-6, 12)
     xlims!(ax, -xlim, xlim)
     return ax
 end
@@ -300,11 +364,17 @@ function circuit_field_panel!(gl)
     ys = [wrapped[i] ? NaN : ys[i] for i in eachindex(ys)]
 
     ax = Axis(
-        gl[1, 1]; xlabel = "X (mm)", ylabel = "Y (mm)", limits = ((0, DX), (0, DX)),
+        gl[1, 1]; xlabel = unitlabel(mit("X"), "mm"), ylabel = unitlabel(mit("Y"), "mm"),
+        limits = ((0, DX), (0, DX)),
         xticks = 0:0.25:0.5, yticks = 0:0.25:0.5, xtickformat = terseticks,
         ytickformat = terseticks, aspect = 1          # the patch is a disc, so keep the field square
     )
-    h = heatmap!(ax, xx, xx, frame'; colormap = seethrough(reverse(sunrise)), rasterize = 10)
+    # Clipped at 0 rather than autoscaled: the negative tail spent a third of the colour range on
+    # values the panel is not about, washing out the positive pops.
+    h = heatmap!(
+        ax, xx, xx, frame'; colormap = seethrough(reverse(sunrise)),
+        colorrange = (0, maximum(frame)), rasterize = 10
+    )
     lines!(ax, xs, ys; color = :white, linewidth = 2.5)
     p = lines!(ax, xs, ys; color = colour, colormap = reverse(cgrad(:turbo)), linewidth = 1.5)
     θ = range(0, 2π, length = 200)                 # the patch rastered in (e)
@@ -317,13 +387,33 @@ function circuit_field_panel!(gl)
         ax, [craw["epositions"][TRACED_NEURON][1]], [craw["epositions"][TRACED_NEURON][2]];
         color = chernoe, markersize = 7, strokecolor = :white, strokewidth = 1
     )
-    Colorbar(gl[1, 2], h; label = "Input (nA)", width = 8)
-    Colorbar(
-        gl[0, 1], p; vertical = false, label = "Time (s)", tickformat = terseticks, height = 8
+    Colorbar(gl[1, 2], h; label = unitlabel("Input", "nA"), width = 8) # fills the field's height
+    cbt = Colorbar(
+        gl[0, 1], p; vertical = false, label = unitlabel("Time", "s"), tickformat = terseticks,
+        height = 8,
+        labelpadding = 1, ticklabelpad = 2
     )
-    rowgap!(gl, 1, Relative(0.02))
+    # The title cannot be an `Axis` title now (that would land between the colorbar and the field),
+    # nor a row of its own: a row above the colorbar pulls the colorbar's own label and tick
+    # protrusion inside the block's box, costing the field ~70 pt of height. It goes in the colorbar
+    # cell's TOP PROTRUSION, stacked outside the box. The padding is read off the colorbar's own
+    # reported protrusion rather than guessed, since both anchor at the cell edge and would
+    # otherwise overlap: that is what puts the title above "Time (s)" instead of on it.
+    lab = Label(
+        gl[0, 1, Top()], "Biophysical circuit"; font = :bold, fontsize = TITLESIZE,
+        padding = lift(
+            d -> (0.0f0, 0.0f0, d.outer.top + 3.0f0, 0.0f0),
+            cbt.layoutobservables.reporteddimensions
+        )
+    )
+    rowgap!(gl, 1, 4.0)
     colgap!(gl, 1, Relative(0.02))
-    return ax
+    # The field is aspect-locked and width-bound, so it letterboxes inside a taller cell and the
+    # colorbars, which fill that cell, overhang it top and bottom. `Aspect` ties the row's height to
+    # column 1's width, making the cell square: the axis then fills it exactly and the bars end
+    # flush with the heatmap's own top and bottom edges.
+    rowsize!(gl, 1, Aspect(1, 1.0))
+    return ax, lab
 end
 
 """
@@ -345,7 +435,8 @@ function circuit_trace_panels!(gl; ts = (FIELD_TINDEX - 5000):FIELD_TINDEX, stri
     xlim = (0, last(tsec))
 
     axv = Axis(
-        gtr[1, 1]; title = "Circuit model", ylabel = "V (mV)", yticklabelspace = YSPACE,
+        gtr[1, 1]; title = "Circuit recordings", ylabel = unitlabel(mit("V"), "mV"),
+        yticklabelspace = YSPACE,
         yticks = WilkinsonTicks(3; k_max = 3), xticks = ([], []), xgridvisible = false,
         limits = (xlim, nothing)
     )
@@ -353,9 +444,12 @@ function circuit_trace_panels!(gl; ts = (FIELD_TINDEX - 5000):FIELD_TINDEX, stri
     hlines!(axv, [-70]; color = bermejo, linestyle = :dash)
     hlines!(axv, [craw["mean_V"]]; color = :gray, linestyle = :dash)
     lines!(axv, tsec, collect(ustripall(V[ts, neuron])); linewidth = 1.2, color = experiment_color)
+    # Glowed: it sits over the trace, which spikes through it. Fathom's smaller default label size
+    # (labelsize 1.1x rather than 1.25x the base) gave this axis more room and let the trace reach
+    # further down into the corner the annotation occupies.
     text!(
-        axv, 0.97, 0.05; text = @sprintf("ν ≈ %.1f Hz", craw["nu"]), space = :relative,
-        align = (:right, :bottom), fontsize = 9
+        axv, 0.97, 0.06; text = rich(mit("ν"), @sprintf(" ≈ %.1f Hz", craw["nu"])), space = :relative,
+        align = (:right, :bottom), fontsize = 16, glowcolor = :white, glowwidth = 12
     )
 
     # Every `stride`-th excitatory neuron across the whole patch: taking a contiguous block instead
@@ -378,13 +472,14 @@ function circuit_trace_panels!(gl; ts = (FIELD_TINDEX - 5000):FIELD_TINDEX, stri
     end
 
     axi = Axis(
-        gtr[3, 1]; ylabel = "I (nA)", xlabel = "Time (s)", yticklabelspace = YSPACE,
+        gtr[3, 1]; ylabel = unitlabel(mit("I"), "nA"), xlabel = unitlabel("Time", "s"),
+        yticklabelspace = YSPACE,
         yticks = WilkinsonTicks(3; k_max = 3), limits = (xlim, (-1, 3))
     )
     lines!(axi, tsec, collect(ustripall(INPUT[ts, neuron])); linewidth = 1.2, color = experiment_color)
 
     axvd = Axis(
-        gd[1, 1]; title = "Potential", ylabel = "Density", xlabel = "V (mV)",
+        gd[1, 1]; title = "Potential", ylabel = "Density", xlabel = unitlabel(mit("V"), "mV"),
         xticks = WilkinsonTicks(3; k_max = 3),
         yticks = WilkinsonTicks(3; k_max = 3), yticklabelspace = YSPACE_D
     )
@@ -393,7 +488,7 @@ function circuit_trace_panels!(gl; ts = (FIELD_TINDEX - 5000):FIELD_TINDEX, stri
 
     axid = Axis(
         gd[2, 1]; title = "Step sizes", ylabel = "Density", yticklabelspace = YSPACE_D,
-        xlabel = "|ΔI| (nA)", xscale = log10, yscale = log10,
+        xlabel = unitlabel(mit("|ΔI|"), "nA"), xscale = log10, yscale = log10,
         xticks = LogTicks(WilkinsonTicks(3; k_max = 3)),
         yticks = LogTicks(WilkinsonTicks(3; k_max = 3))
     )
@@ -412,46 +507,54 @@ function combined_curves_panels!(gl)
     psd = plot_data["spectral_curves"][STIM]["VISp"]
     fano = plot_data["fano_curves"][STIM]
 
-    # * MAD. Both curves are min-max normalised in log space, so only the SLOPES are comparable;
-    #   each dashed line is a MAPPLE fit computed HERE on the drawn median curve, drawn over the
-    #   band it was fit on.
+    # * MAD. Both curves are translated in log space (`logshift`, not min-max normalised), so the
+    #   drawn slopes ARE the exponents and the two curves are directly comparable by eye. Each
+    #   dashed line is a MAPPLE fit computed HERE on the drawn median curve, over the 0-8 ms band;
+    #   the curve steepens then rolls into its plateau, so that band is steeper than the rise as a
+    #   whole and the guide is correspondingly steeper than the curve away from it.
+    # Exponent labels are placed in RELATIVE space: (h) and (i) have wildly different y ranges
+    # (0.9 decades against 7.2), so a fixed gap in data units reads as a different gap on the page,
+    # and every change to a limit used to move them off their marks. One gap, both panels.
+    LABEL_X, LABEL_GAP = 0.02, 0.155
+
     mfit_exp = mad_mapple(mad.t_all, mad.mu)
     mfit_circ = mad_mapple(circuit.mad.t, circuit.mad.mu)
     axm = Axis(
-        gl[1, 1]; ylabel = "MAD (arb. units)", xlabel = "Time lag (s)", title = "Diffusion",
+        gl[1, 1]; ylabel = "MAD (arb. units)", xlabel = unitlabel("Time lag", "s"),
+        title = "Diffusion",
         xscale = log10, yscale = log10,
         limits = ((10^(-3.4), 10^0.1), nothing)
     )
     band!(
-        axm, mad.t_all, exp10.(normalise(log10.(mad.σl))), exp10.(normalise(log10.(mad.σh)));
+        axm, mad.t_all, logshift(mad.σl, mad.mu), logshift(mad.σh, mad.mu);
         color = experiment_color, alpha = 0.5
     )
     lines!(
-        axm, mad.t_all, exp10.(normalise(log10.(mad.mu)));
+        axm, mad.t_all, logshift(mad.mu, mad.mu);
         color = experiment_color, label = "Experiment\n(LFP)"
     )
     idxs = mad.fit_t .< 0.005
     lines!(
-        axm, mad.fit_t[idxs] .* 2, lognorm(predict(mfit_exp, mad.fit_t), mad.mu)[idxs];
+        axm, mad.fit_t[idxs] ./ 2, logshift(predict(mfit_exp, mad.fit_t), mad.mu)[idxs];
         linestyle = :dash, color = experiment_color
     )
     lines!(
-        axm, circuit.mad.t, exp10.(normalise(log10.(circuit.mad.mu)));
+        axm, circuit.mad.t, logshift(circuit.mad.mu, circuit.mad.mu);
         color = circuit_color, label = "Circuit\n(input)"
     )
     idxs = circuit.mad.fit_t .< 0.005
     lines!(
-        axm, circuit.mad.fit_t[idxs] ./ 2,
-        lognorm(predict(mfit_circ, circuit.mad.fit_t), circuit.mad.mu)[idxs];
+        axm, circuit.mad.fit_t[idxs] .* 2,
+        logshift(predict(mfit_circ, circuit.mad.fit_t), circuit.mad.mu)[idxs];
         color = circuit_color, linestyle = :dash
     )
     text!(
-        axm, 1.0e-2, 10^0.7; text = "a = $(round(only(betas(mfit_exp)), sigdigits = 2))",
-        color = experiment_color, align = (:left, :top)
+        axm, LABEL_X, 0.96; text = rich(mit("a"), " = $(round(only(betas(mfit_exp)), sigdigits = 2))"),
+        space = :relative, color = experiment_color, align = (:left, :top)
     )
     text!(
-        axm, 10^(-3.35), 10^1; text = "a = $(round(only(betas(mfit_circ)), sigdigits = 2))",
-        color = circuit_color, align = (:left, :top)
+        axm, LABEL_X, 0.96 - LABEL_GAP; text = rich(mit("a"), " = $(round(only(betas(mfit_circ)), sigdigits = 2))"),
+        space = :relative, color = circuit_color, align = (:left, :top)
     )
     axislegend(axm; position = :rb, framevisible = false)
 
@@ -463,37 +566,57 @@ function combined_curves_panels!(gl)
     #   arm paired with an over-steep high-frequency one (+0.91/-4.08 experiment, +2.6/-5.92
     #   circuit, against true band slopes of about -0.9 and -2.5).
     axp = Axis(
-        gl[1, 2]; xlabel = "Frequency (Hz)", ylabel = "PSD (arb. units)", title = "Power spectrum",
+        gl[1, 2]; xlabel = unitlabel("Frequency", "Hz"), ylabel = "PSD (arb. units)",
+        title = "Power spectrum",
         xscale = log10, yscale = log10,
         xticks = [3, 10, 30, 100], limits = ((2, 500), nothing)
     )
-    lines!(axp, psd.f, exp10.(normalise(log10.(psd.μ))); color = (experiment_color, 0.8))
+    # Both spectra are shifted through 1 at `F0`, so they overlay where the comparison is made and
+    # the eye reads the difference in slope rather than a difference in offset. The guides span
+    # `GUIDE` only: a straight line of slope -1.75 across the full 2-500 Hz axis would run four
+    # decades and say nothing about the band the exponent describes.
+    F0 = 30
+    # Decades the circuit spectrum is dropped. It has to clear not just the experiment's curve but
+    # the experiment's guide, which dives below that curve: at 100 Hz the guide sits 1.4 decades
+    # under the experiment, so anything less than ~2 puts the circuit curve on top of it.
+    CIRCUIT_DROP = 2.2
+    # The circuit's band is `fit_f` itself (11-1000 Hz), clipped to the axis. The experiment's `β`
+    # is the SECOND MAPPLE component, whose knots `WRExperiment.mapple_fit` fixes at PSD_KNEE = 3 Hz
+    # and the top of PSD_RANGE = 500 Hz --- but its guide is drawn only from the circuit band's
+    # lower edge, so both segments span the same frequencies and the only difference a reader sees
+    # between them is a difference in slope.
+    CIRC_BAND = (max(minimum(circuit.psd.fit_f), 2), min(maximum(circuit.psd.fit_f), 500))
+    EXP_BAND = (first(CIRC_BAND), 500.0)
+    GUIDE_LIFT = 0.45
+    ey = logshift(psd.μ, logat(psd.f, psd.μ, F0))
+    lines!(axp, psd.f, ey; color = (experiment_color, 0.8))
     band!(
-        axp, psd.f, exp10.(normalise(log10.(psd.σl))), exp10.(normalise(log10.(psd.σh)));
-        color = (experiment_color, 0.32)
+        axp, psd.f, logshift(psd.σl, logat(psd.f, psd.μ, F0)),
+        logshift(psd.σh, logat(psd.f, psd.μ, F0)); color = (experiment_color, 0.32)
     )
-    lines!(
-        axp, psd.f, 1.25 .* exp10.(normalise(log10.(psd.f .^ psd.spectral_exponent_median)));
+    slopeguide!(
+        axp, psd.f, ey, EXP_BAND, psd.spectral_exponent_median, GUIDE_LIFT;
         color = experiment_color, linestyle = :dash
     )
-    lines!(axp, circuit.psd.f, exp10.(normalise(log10.(circuit.psd.mu))) .* 1.35; color = circuit_color)
-    lines!(
-        axp, circuit.psd.fit_f,
-        1.25 .* exp10.(normalise(log10.(circuit.psd.fit_f .^ circuit.psd.exponent)));
+    cy = logshift(circuit.psd.mu, logat(circuit.psd.f, circuit.psd.mu, F0) + CIRCUIT_DROP)
+    lines!(axp, circuit.psd.f, cy; color = circuit_color)
+    slopeguide!(
+        axp, circuit.psd.f, cy, CIRC_BAND, circuit.psd.exponent, GUIDE_LIFT;
         color = circuit_color, linestyle = :dash
     )
     text!(
-        axp, 7, 10^0.4; text = "b = $(round(psd.spectral_exponent_median; sigdigits = 3))",
-        color = experiment_color, align = (:left, :top)
+        axp, LABEL_X, 0.43; text = rich(mit("b"), " = $(round(psd.spectral_exponent_median; sigdigits = 3))"),
+        space = :relative, color = experiment_color, align = (:left, :top)
     )
     text!(
-        axp, 20, 10; text = "b = $(round(circuit.psd.exponent; sigdigits = 3))",
-        color = circuit_color, align = (:left, :bottom)
+        axp, LABEL_X, 0.43 - LABEL_GAP; text = rich(mit("b"), " = $(round(circuit.psd.exponent; sigdigits = 3))"),
+        space = :relative, color = circuit_color, align = (:left, :top)
     )
 
     # * Fano factor, unnormalised (both are dimensionless counts).
     axf = Axis(
-        gl[1, 3]; xlabel = "Time lag (s)", ylabel = "Fano factor", title = "Fano factor",
+        gl[1, 3]; xlabel = unitlabel("Time lag", "s"), ylabel = "Fano factor",
+        title = "Fano factor",
         xscale = log10, yscale = log10
     )
     band!(axf, 0.001 .* fano.t_all, fano.sl, fano.su; color = experiment_color, alpha = 0.3)
@@ -519,11 +642,11 @@ function combined_curves_panels!(gl)
         color = circuit_color, linestyle = :dash
     )
     text!(
-        axf, 0.001 .* 40, 10^0.32; text = "c = $(round(ffit_exp.β, digits = 2))",
+        axf, 0.001 .* 40, 10^0.32; text = rich(mit("c"), " = $(round(ffit_exp.β, digits = 2))"),
         color = experiment_color, align = (:left, :center)
     )
     text!(
-        axf, 0.001 .* 1.2, 1.4; text = "c = $(round(circuit.fano.exponent, digits = 2))",
+        axf, 0.001 .* 1.2, 1.4; text = rich(mit("c"), " = $(round(circuit.fano.exponent, digits = 2))"),
         color = circuit_color, align = (:left, :center)
     )
     return (;
@@ -538,25 +661,90 @@ end
 # ──────────────────────────────────────────────────────────────────────────────
 
 begin # * Render
-    f = SixPanel()
+    # Right padding raised from the default 16: (f) and (g) centre their last x tick label on the
+    # cell's right edge, so it overhangs by ~12 pt and the group box has to reach past it (-16
+    # below). Without the extra padding that box would sit 2 pt from the page edge.
+    f = SixPanel(; figure_padding = (16, 26, 16, 16))
     gtop = f[1, 1] = GridLayout()
     gmid = f[2, 1] = GridLayout()
-    gbot = f[3, 1] = GridLayout()
+    gbot = f[3, 0:1] = GridLayout(; alignmode = Makie.Mixed(left = 0))
+
+    # Group boxes, as in Fig 2: experiment in blue, circuit in red; the combined curves below
+    # belong to both and stay unboxed. Negative `Outside` reaches over the protrusions so the
+    # panel letters, titles and axis labels sit inside the box --- no row can hold them, since
+    # they ARE the protrusion. Values are measured from the solved layout, not guessed: the rows
+    # protrude 60 pt left (to the page margin), 29 pt above and 53 pt below.
+    groupbox(gp, c; fillalpha = 0.05, top = -34) = Box(
+        gp; color = (c, fillalpha), strokecolor = (c, 0.35), strokewidth = 1.5,
+        cornerradius = 8, alignmode = Outside(-64, -16, -56, top)
+    )
+    # Vertical block labels outside the boxes, in a new column 0 of the FIGURE layout (not of each
+    # row's own layout, or the two boxed rows would size that column differently and their left
+    # edges would stop agreeing). The summary row spans 0:1 so that it reaches the page margin too,
+    # rather than starting right of the label column; `Mixed(left = 0)` is what makes that safe,
+    # since it keeps the row's 57 pt ylabel protrusion inside its own cell instead of reserving it
+    # to the LEFT of the label column and pushing the labels off the margin. Its axes are therefore
+    # narrower than the rows above and no longer align with them --- deliberate. Only the left side
+    # is switched: a full `Outside` would pull the titles and xlabels inside the cell too and
+    # squash the row's height.
+    blocklabel(gp, text) = Label(
+        gp, text; rotation = pi / 2, font = :bold, fontsize = 18, tellheight = false
+    )
+    lab_exp = blocklabel(f[1, 0], "Experiment")
+    lab_cir = blocklabel(f[2, 0], "Circuit model")
+    box_exp = groupbox(gtop[1, 1:3], baikal)
+    # A deeper top reach than the blue box: (d)'s title stacks above the time colorbar's own label
+    # and ticks, so this row protrudes ~50 pt further than the other. The same value on the blue box
+    # would carry it off the top of the page.
+    box_cir = groupbox(gmid[1, 1:2], bermejo; fillalpha = 0.03, top = -86)
+    # A blocklabel is centred on its row's CELL; the box reaches past that cell by different amounts
+    # above and below (56 pt down, 34 or 86 up), so the two centres differ. Translate the label onto
+    # the box --- after `addlabels!`, which re-solves the layout.
+    centre_on_box!(lab, box) = let b = lab.layoutobservables.computedbbox[],
+            d = box.layoutobservables.computedbbox[]
+
+        Makie.translate!(
+            lab.blockscene, 0,
+            (d.origin[2] + d.widths[2] / 2) - (b.origin[2] + b.widths[2] / 2), 0
+        )
+    end
 
     # Top: brain illustration | LFP + raster | increment distribution
-    ax_brain = pdfpanel!(gtop[1, 1], projectdir("brain.pdf"))
+    # (a) carries no ylabel or xlabel, so the protrusion bands its neighbours fill with "Time (s)"
+    # and tick labels sit empty around it. `Mixed` lets the aspect-locked brain reach into them ---
+    # left to its own panel letter, right into the column gap, down into the xlabel band --- which
+    # costs (b) and (c) nothing. The top is left alone so the title stays outside.
+    ax_brain = pdfpanel!(
+        gtop[1, 1], projectdir("brain.pdf"); title = "Mouse brain", flipx = true,
+        # Shifted left by widening the left reach and insetting the right by the same amount, so the
+        # drawn width is unchanged. The limit is the group box's left border (x = 10), not the panel
+        # letter, which sits above the brain's top edge and so never meets it.
+        alignmode = Makie.Mixed(left = -51, right = 28, bottom = -20)  # `Mixed` is ambiguous here
+    )
     g_traces = gtop[1, 2] = GridLayout()
-    traces_panel!(g_traces, traces)
+    ax_lfp, ax_raster = traces_panel!(g_traces, traces)
     ax_incr = Axis(
-        gtop[1, 3]; yscale = log10, xlabel = "Increment (SD)", ylabel = "Density",
-        title = "L2/3 increments"
+        gtop[1, 3]; yscale = log10, xlabel = unitlabel("Increment", "SD"), ylabel = "Density",
+        title = "L2/3 increments",
+        # pinned: the headroom the legend needs pushes Makie onto half-decade exponents otherwise
+        yticks = LogTicks(-6:2:0)
     )
     increment_panel!(ax_incr, incr)
 
     # Middle: input field + trajectory | traces and densities
+    # Centred, not pinned to the top: (d)'s title now stacks above the time colorbar rather than
+    # sitting on the axis, so pinning would drive it into the blue box above. Its baseline no longer
+    # agrees with (e) and (f), which is inherent to the title being two bands higher than theirs.
     g_field = gmid[1, 1] = GridLayout()
-    circuit_field_panel!(g_field)
-    g_ctr = gmid[1, 2] = GridLayout()
+    ax_field, lab_field = circuit_field_panel!(g_field)
+    # (e) and (f)/(g) share a cell with (d), but (d) protrudes 72 pt above it (time colorbar band
+    # plus title) where this block protrudes only 28, so its titles sat 45 pt low. That band is
+    # empty on this side, just unclaimed, and `Mixed` lets the block reach into it while leaving the
+    # other three sides as `Inside`. The value is (d)'s own top protrusion, so the two blocks' outer
+    # edges coincide and the titles line up. `Outside` cannot do this: it folds every protrusion
+    # inside the box, so the block then reports none, the layout stops reserving the 57 pt gutter
+    # (e)'s ylabels need, and they land on top of (d)'s colorbar.
+    g_ctr = gmid[1, 2] = GridLayout(; alignmode = Makie.Mixed(top = -72))
     ctr = circuit_trace_panels!(g_ctr)
     colsize!(gmid, 1, Relative(0.36)) # the field is aspect-locked; an even split letterboxes it
 
@@ -565,6 +753,11 @@ begin # * Render
 
     # Row heights: the circuit row carries the tallest content (field + its colorbar, and the
     # three-panel trace stack). The top row's columns stay even, which keeps the brain large.
+    # (d)'s title stack makes the circuit row protrude ~86 pt above its cell while the experiment
+    # row's box reaches 56 pt below its own; the default gap between the two rows is not wide enough
+    # to hold both, and the boxes overlap.
+    colgap!(f.layout, 1, 10.0) # block labels to the panels' own ylabel band
+    rowgap!(f.layout, 1, 26.0)
     rowsize!(f.layout, 1, Relative(0.3))
     rowsize!(f.layout, 2, Relative(0.38))
     addlabels!(
@@ -572,12 +765,52 @@ begin # * Render
             gtop[1, 1], g_traces[1, 1], gtop[1, 3],       # a-c  experiment
             g_field[0, 1], ctr.gtr[1, 1], ctr.gd[1, 1], ctr.gd[2, 1],  # d-g  circuit
             gbot[1, 1], gbot[1, 2], gbot[1, 3],           # h-j  combined curves
-        ], f; fontsize = 16,
-        # (d) anchors to the time colorbar's row, whose own label occupies the protrusion the panel
-        # letter would otherwise use; lift it clear so it sits above the bar.
-        dy = [0, 0, 0, 26, 0, 0, 0, 0, 0, 0]
+        ], f;
+        # (a) has no ylabel to fill the gutter its box reaches into, unlike the rows below, so
+        # its letter alone is pulled out to the page margin the ylabels set (x = 16 pt).
+        # Narrowing the rows for the block labels pushed several titles into their letters; these
+        # offsets restore ~12 pt of clearance (measured as title left edge minus letter right edge).
+        dx = [-40, -20, 0, -12, -10, -5, -6, 0, 0, 0],
+        # (d)'s letter anchors to the time colorbar's cell, whose top protrusion holds the colorbar
+        # label and, above it, the panel title; lift it level with that title.
+        dy = [0, 0, 0, 50, 0, 0, 0, 0, 0, 0]
     )
+    # (d)'s title is a `Label` centred on its CELL, but the field axis is inset within that column
+    # by its ylabel and ticks, so the title sat 17 pt left of the panel it titles. Translating it is
+    # what `addlabels!` does for the letters; padding would not move it 1:1. After `addlabels!`,
+    # since adding the letters re-solves the layout.
+    let b = lab_field.layoutobservables.computedbbox[], d = Fathom.drawnbox(ax_field)
+        Makie.translate!(
+            lab_field.blockscene,
+            (d.origin[1] + d.widths[1] / 2) - (b.origin[1] + b.widths[1] / 2), 0, 0
+        )
+    end
+    centre_on_box!(lab_exp, box_exp)
+    centre_on_box!(lab_cir, box_cir)
     display(f)
+
+    # Two lines from (a)'s blue probe out to the top and bottom of (b), bracketing it: this is what
+    # that probe records. They span the gap between two panels, so they cannot live in either axis;
+    # the layout is solved by now, so the anchors are read off the drawn boxes rather than guessed.
+    #
+    # They go in an OVERLAY scene, not `f.scene`. Every Block paints its own child scene over the
+    # figure's root scene, so a line drawn into the root is hidden wherever it crosses a panel --- and
+    # the lower line runs most of the way across (a) before it clears the brain, leaving it to appear
+    # from nowhere halfway to (b). A scene built after the blocks draws over all of them.
+    let vp = Fathom.drawnbox(ax_brain), lim = ax_brain.finallimits[],
+            top = Fathom.drawnbox(ax_lfp), bot = Fathom.drawnbox(ax_raster),
+            overlay = Scene(f.scene; camera = campixel!, clear = false)
+
+        px = vp.origin[1] + (BRAIN_PROBE[1] - lim.origin[1]) / lim.widths[1] * vp.widths[1]
+        py = vp.origin[2] + (BRAIN_PROBE[2] - lim.origin[2]) / lim.widths[2] * vp.widths[2]
+        for y in (top.origin[2] + top.widths[2], bot.origin[2])
+            lines!(
+                overlay, [Point2f(px, py), Point2f(top.origin[1], y)];
+                color = (experiment_color, 0.6), linewidth = 2.2, linestyle = :dash
+            )
+        end
+        @info "probe bracket" probe = round.((px, py)) panel_b_left = round(top.origin[1]) panel_b_y = round.((top.origin[2] + top.widths[2], bot.origin[2]))
+    end
 end
 
 begin # * Save figure
