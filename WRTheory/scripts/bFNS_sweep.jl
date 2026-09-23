@@ -15,7 +15,10 @@ WRTheory.@preamble()
 import FractionalNeuralSampling: Density
 
 begin # * Add procs
-    AcademicClusters.USydPhysics.distributeprocs(66; ncpus = 1, mem = "6GB", walltime = "23:00:00")
+    AcademicClusters.USydPhysics.distributeprocs(
+        66; ncpus = 1, mem = "6GB", walltime = "23:00:00",
+        hpcs = ["cartman", "karl"] # orr SIGKILLs julia a few seconds into `using TimeseriesTools`
+    )
 
     @everywhere using WRTheory
     @everywhere using FractionalNeuralSampling
