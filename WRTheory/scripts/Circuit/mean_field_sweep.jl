@@ -10,7 +10,6 @@ using StableDistributions
 WRTheory.@preamble()
 using AcademicClusters
 using Distributed
-set_theme!(foresight(:physics))
 
 begin # * Add workers
     AcademicClusters.USydPhysics.addprocs(

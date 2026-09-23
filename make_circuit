@@ -1,8 +1,0 @@
-#! /bin/bash
-SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-
-bash "$PROJECT_DIR/WRCircuit/scripts/demo_run.jl"
-
-# * You really will need to run this on a cluster with high mem (120 GB) and a good GPU (l40). It will take a few days to run.
-bash "$PROJECT_DIR/WRCircuit/scripts/circuit_sweep.jl"

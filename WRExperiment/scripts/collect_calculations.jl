@@ -111,7 +111,7 @@ begin # * Pooled L2/3 increment distribution against its FT surrogate null (Fig 
                 end
                 append!(kurt, k_this)
                 append!(kurt_surr, ks_this)
-                # Session-level value: median over this session's L2/3 channels, matching `collect_surrogates.jl`.
+                # Session-level value: median over this session's L2/3 channels, matching `save_surrogate_statistics` (Fig 4).
                 kk, kks = filter(!isnan, k_this), filter(!isnan, ks_this)
                 isempty(kk) || push!(kurt_sess, median(kk))
                 isempty(kks) || push!(kurt_sess_surr, median(kks))
@@ -533,37 +533,6 @@ begin
     end
 
 
-    # Kendall τ against the anatomical hierarchy at each depth, for any per-structure Depth×SessionID
-    # quantity. Structures are put on a shared session set and a shared depth grid first.
-    function hierarchical_tau(χ; N = 10000, method = :group)
-        common = intersect(lookup.(χ, SessionID)...) # structures keep different session subsets; align to shared
-        χ = getindex.(χ, [SessionID(At(common))])[Structure = At(structures)]
-        unidepths = commondepths(lookup.(χ, [Depth]))
-
-        unichi = getindex.(χ, [Depth(Near(unidepths))])
-        unichi = set.(unichi, [Depth => unidepths])
-        y = cat(unichi...; dims = Structure(structures))
-
-        x = getindex.([hierarchy_scores], structures)
-        μ, σ, 𝑝 = hierarchicalkendall(x, y, method; N)
-        return (; μ, σ, 𝑝, unidepths)
-    end
-
-    diffusion_hierarchical = Dict{String, Any}()
-    spectral_hierarchical = Dict{String, Any}()
-
-    for stimulus in stimuli
-        stim_str = string(stimulus)
-        @unpack coeffs, mapple = madev_data[stim_str]
-
-        diffusion_hierarchical[stim_str] = hierarchical_tau(coeffs)
-        # Negated to match spectral_exponents' sign (PSD ~ f^b with b < 0); τ flips with it.
-        spectral_hierarchical[stim_str] = hierarchical_tau(.-mapple["χ"])
-
-        @info "Computed hierarchical correlations for $stim_str"
-    end
-
-
     mad_curves = Dict{String, Any}()
 
     for stimulus in stimuli
@@ -695,8 +664,6 @@ begin
         spectral_curves,
         spectral_exponents,
         fano_slopes,
-        diffusion_hierarchical,
-        spectral_hierarchical,
         mad_curves,
         fano_curves
     )

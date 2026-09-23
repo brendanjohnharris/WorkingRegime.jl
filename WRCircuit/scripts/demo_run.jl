@@ -14,7 +14,7 @@ using MoreMaps
 using StatsBase: Histogram, merge!
 using Logging, TerminalLoggers
 WRCircuit.@preamble
-set_theme!(fathom(:physics))
+set_theme!(fathom())
 outfile = datadir("demo_run.jld2")
 
 begin

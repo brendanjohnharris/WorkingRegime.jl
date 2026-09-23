@@ -7,7 +7,6 @@ const _preamble = quote
     using ProgressLogging
     using Logging
     using TimeseriesTools
-    using ComplexityMeasures
     using CairoMakie
     using TimeseriesMakie
     using Fathom
@@ -26,14 +25,12 @@ macro preamble()
     return _preamble
 end
 
-plotdir(args...) = projectdir("plots", args...)
 const connector = '&'
-export plotdir, connector, variability_exponent, variability_model, VARIABILITY_SEED,
+export connector, variability_exponent, variability_model, VARIABILITY_SEED,
     VARIABILITY_PINS, VARIABILITY_WIDTH, VARIABILITY_NOFIT
 
 include("Variability.jl")
 include("Utils.jl")
-include("Makie.jl")
 include("Circuit.jl")
 
 end

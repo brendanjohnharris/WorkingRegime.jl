@@ -1,8 +1,8 @@
 #! /bin/bash
 
-# ? Prior to this script, you should have EITHER:
-# ?     1. Downloaded the precomputed plot data, OR:
-# ?     2. Run the all the calculation scripts, as described in the README, to generate the plot data.
+# Runs every figure script, in figure order. Prior to this script, EITHER:
+#     1. download the precomputed plot data, OR:
+#     2. run the calculation scripts in the order given under "Producing the data" in README.md.
 
 PROJECT_DIR="$(dirname "$(realpath "$0")")"
 

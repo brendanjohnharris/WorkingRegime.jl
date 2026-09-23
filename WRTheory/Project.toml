@@ -8,7 +8,6 @@ FractionalNeuralSampling = {rev = "main", url = "https://github.com/brendanjohnh
 
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-ComplexityMeasures = "ab4b797d-85ee-42ba-b621-05d793b346a2"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 DiffEqNoiseProcess = "77a26b50-5914-5dd7-bc55-306e6241c503"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"

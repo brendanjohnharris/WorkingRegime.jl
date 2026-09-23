@@ -7,31 +7,16 @@ using Unitful
 import Dewdrop
 using Dewdrop: solve, FixedStep, Trace, Spikes, MADev, Welch, SpikeRate, Fano
 
-export simulate, simulate_batch, bpformat, bpsolve, Neuron, Population, Monitor, Spatial, PRNGKey,
+export simulate, simulate_batch, bpformat, bpsolve, Neuron, Population, Spatial, PRNGKey,
     models, defaults
 
 # Reuse Dewdrop's TimeseriesBase-extension output dimensions (registered when TimeseriesBase loads),
 # rather than re-declaring `Neuron`/`Population` --- a second `@dim` of those names would clash with the
 # ext's during precompilation ("method overwriting"). `basetypeof ∘ name2dim` recovers the constructable
 # dim type by name (the ext's `ToolsDim` types; a generic `Dim{:name}` if the ext is not present, which
-# still indexes by name). `Var`/`𝑡` come from TimeseriesBase; `Monitor` is WRCircuit-only (no ext
-# counterpart, so a plain `@dim` is safe).
+# still indexes by name). `Var`/`𝑡` come from TimeseriesBase.
 const Neuron = DimensionalData.basetypeof(DimensionalData.name2dim(Val(:Neuron)))
 const Population = DimensionalData.basetypeof(DimensionalData.name2dim(Val(:Population)))
-DimensionalData.@dim Monitor ToolsDim
-
-# Row-major (Python/BrainPy) flat → 2D reshape: reverse the dims then permute, so a flattened
-# `(n, n)` neuron list lays out the same way it did under the BrainPy backend (used by `Plots.infer_geometry`).
-function python_reshape(A, ds...)
-    return PermutedDimsArray(reshape(A, ds), reverse(1:length(ds)))
-end
-
-popvars2monitors(populations, vars) =
-    Tuple("$p.$v" for (p, v) in collect(Iterators.product(populations, vars))[:])
-function monitors2popvars(monitors)
-    ps = [(Symbol(p[1]), Symbol(p[2])) for p in split.(monitors, ".")]
-    return unique(first.(ps)), unique(last.(ps))
-end
 
 # Seeds were JAX PRNG keys; natively a seed is just an integer fed to Dewdrop's counter RNG.
 PRNGKey(seed::Integer) = UInt64(seed)

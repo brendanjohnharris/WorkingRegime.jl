@@ -13,8 +13,7 @@ Evaluate `stat` on `x` and on `n` surrogates of it: returns `(; s0, s)`, the dat
 null statistics. Columns of a matrix are surrogated independently and `stat` receives the whole
 draw, so pooled and channel-aggregated statistics see per-channel surrogates. `stat` must replicate
 the full quoted pipeline (including any aggregation) and should be deterministic; draw `k` uses
-`Xoshiro(seed + k)`, so results are reproducible and threading-invariant. Summarize with
-[`surrogatep`](@ref) and [`surrogatez`](@ref).
+`Xoshiro(seed + k)`, so results are reproducible and threading-invariant.
 """
 function surrogate_null(
         stat, x::AbstractVecOrMat{<:Real}, method::Surrogate = RandomFourier();
@@ -30,76 +29,6 @@ surrogatedraw(x::AbstractVector, method, rng) = surrogenerator(collect(x), metho
 function surrogatedraw(X::AbstractMatrix, method, rng)
     return mapreduce(c -> surrogenerator(collect(c), method, rng)(), hcat, eachcol(X))
 end
-
-"""
-    surrogatep(r; tail)
-
-One-sided rank p-value for a [`surrogate_null`](@ref) result, floored at `1/(n + 1)`. `tail = :left`
-tests the data statistic being SMALLER than the null (stable α); `tail = :right`, LARGER (MAD
-exponent). No default: the direction is a claim, so state it.
-"""
-function surrogatep((; s0, s); tail)
-    c = if tail === :left
-        count(<=(s0), s)
-    elseif tail === :right
-        count(>=(s0), s)
-    else
-        throw(ArgumentError("tail must be :left or :right"))
-    end
-    return (1 + c) / (length(s) + 1)
-end
-
-"""
-    surrogatez(r)
-
-Standardized effect for a [`surrogate_null`](@ref) result: null standard deviations between the data
-statistic and the null mean. The per-subject effect to pool at the group level (signed-rank across
-sessions), where per-session rank p-values are floored and ranges of them carry no evidence.
-"""
-surrogatez((; s0, s)) = (s0 - mean(s)) / std(s)
-
-"""
-    surrogate_diffusion_exponent(x; band = MAD_BAND, kwargs...)
-
-Diffusion (MAD) exponent of the regularly sampled series `x` (time in seconds) against surrogates,
-via the pipeline statistic: `madev` on the [`madev_taus`](@ref) grid, then [`diffusion_fit`](@ref)
-over `band`. For a multivariate series, channels are surrogated independently and the statistic is
-the exponent of the median MAD curve across channels (the pipeline's cross-depth fit). One-sided
-direction: `a` LARGER than the null; use `surrogatep(r; tail = :right)`. Remaining `kwargs` pass to
-[`surrogate_null`](@ref).
-"""
-function surrogate_diffusion_exponent(
-        x::Union{UnivariateRegular, MultivariateRegular}; band = MAD_BAND, kwargs...
-    )
-    x = ustripall(x)
-    dt = TimeseriesTools.samplingperiod(x)
-    taus = madev_taus(dt)
-    lags = round.(Int, taus ./ dt)
-    stat = y -> diffusion_fit(_madcurve(y, lags, taus); band)
-    return surrogate_null(stat, parent(x); kwargs...)
-end
-
-_madcurve(y::AbstractVector, lags, taus) = Timeseries(madev(y, lags), taus)
-function _madcurve(Y::AbstractMatrix, lags, taus) # median across channels, as the cross-depth fit
-    return Timeseries(vec(median(mapreduce(c -> madev(c, lags), hcat, eachcol(Y)); dims = 2)), taus)
-end
-
-"""
-    surrogate_kurtosis(x; kwargs...)
-
-Excess kurtosis of the single-sample increments of `x` against surrogates. Surrogates are built on
-the SERIES and differenced inside: surrogating the increments themselves would permute the very
-values whose distribution is measured. Matrix input is surrogated per channel and the statistic is
-the median across channels. One-sided direction: LARGER than the null (`tail = :right`). Remaining
-`kwargs` pass to [`surrogate_null`](@ref).
-"""
-function surrogate_kurtosis(x::AbstractVecOrMat; kwargs...)
-    x = parent(ustripall(x))
-    stat = y -> _kurtosis(y)
-    return surrogate_null(stat, x; kwargs...)
-end
-_kurtosis(y::AbstractVector) = kurtosis(diff(y))
-_kurtosis(Y::AbstractMatrix) = median(kurtosis(diff(c)) for c in eachcol(Y))
 
 """
     lfp_surrogate_stats(Y, dt; band = MAD_BAND)

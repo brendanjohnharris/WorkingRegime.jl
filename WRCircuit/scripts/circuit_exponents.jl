@@ -58,7 +58,7 @@ try
 
     # Which planes to (re)compute. ONLY these are fit (the multi-hour cost) and written; every other plane
     # already in circuit_sweep.jld2 is preserved
-    PLANES = [:dtd, ] # [:dg, :ds, :gs, :td, :dtd]
+    PLANES = [:dg] # [:dg, :ds, :gs, :td, :dtd]
     want(p) = p in PLANES
 
     begin # * Index sweep files by plane. Each file is named for exactly its two swept axes + seed, so a

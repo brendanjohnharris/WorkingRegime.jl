@@ -4,7 +4,7 @@
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
-@quickactivate "WorkingRegime"
+@quickactivate :WorkingRegime
 using JLD2
 import JSON
 import Colors
@@ -23,7 +23,6 @@ using DelimitedFiles
 include(projectdir("WRExperiment", "src", "SessionKendall.jl"))
 
 set_theme!(fathom())
-include(joinpath(@__DIR__, "mathlabels.jl")) # mit/unitlabel/mathify: symbols in the equation face
 
 const structures = ["VISp", "VISl", "VISrl", "VISal", "VISpm", "VISam"]
 const hierarchy_scores = Dict(
@@ -58,28 +57,8 @@ NAME = "Fig4_hierarchical_variation"
 outdir = plotsdir(NAME)
 mkpath(outdir)
 
-# Stored ToolsArrays/DimArrays load as real DimArrays via TimeseriesBase's `toolsarray_typemap`; custom
-# dims absent from this project (Structure, SessionID, α, ...) come back as generic `Dim{:name}` with
-# lookups intact, so we index them by name.
-"Index by named values along one or more dims (returns the slice)."
-_select(x, selectors::Pair...) = getindex(x; (Symbol(n) => At(v) for (n, v) in selectors)...)
-
 "Pick one element of an array whose elements are themselves arrays."
 _select_outer(x, dimname::Symbol, val) = _select(x, dimname => val)
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Bootstrap median + 95% CI across sessions
-# ──────────────────────────────────────────────────────────────────────────────
-
-function percentilebootmedian(x; N = 10_000, α = 0.05)
-    x = collect(skipmissing(x))
-    x = filter(!isnan, x)
-    isempty(x) && return (NaN, (NaN, NaN))
-    rng = Random.MersenneTwister(42)
-    n = length(x)
-    meds = [median(x[rand(rng, 1:n, n)]) for _ in 1:N]
-    return median(x), Tuple(quantile(meds, (α / 2, 1 - α / 2)))
-end
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -459,7 +438,7 @@ begin # * Top left — the visual cortical areas, coloured by hierarchy position
     # Geometry from SpatiotemporalMotifs.jl: the svg is embedded as vector art (its dense area
     # paths tessellate badly through `poly!`), recoloured in place to this figure's hierarchy
     # palette; the json supplies the label centroids.
-    svg = read(datadir("visual_cortex.svg"), String)
+    svg = read(projectdir("assets", "visual_cortex.svg"), String)
     svg = replace(
         svg, r"<path\b[^>]*>" => function (tag)
             m = match(r"id=\"(VIS\w+)\"", tag) # fill paths; lowercase ids are the outlines
@@ -479,7 +458,7 @@ begin # * Top left — the visual cortical areas, coloured by hierarchy position
     hidespines!(ax_map)
     svgimage!(ax_map, svg)
 
-    cortex = JSON.parsefile(datadir("visual_cortex.json")) # image coordinates, y down
+    cortex = JSON.parsefile(projectdir("assets", "visual_cortex.json")) # image coordinates, y down
     # The svg's areas overlap (VISp paints over its neighbours' centroids), so the small/hidden
     # areas get hand-placed anchors on their visible parts; the rest use their path centroid.
     label_pos = Dict("VISpm" => (232.0, 120.0), "VISam" => (205.0, 45.0), "VISal" => (28.0, 78.0))
@@ -687,7 +666,7 @@ file. Reuses the objects the figure was drawn from, so the files cannot drift fr
 """
 function save_source_data()
     # b --- the region scatter with its session-bootstrap 95% CIs. Panel a is the cortex map,
-    # whose geometry is data/visual_cortex.json and whose colours are the hierarchy scores above.
+    # whose geometry is assets/visual_cortex.json and whose colours are the hierarchy scores above.
     writedlm(
         joinpath(outdir, "panelB.tsv"),
         vcat(

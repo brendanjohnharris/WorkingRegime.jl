@@ -10,27 +10,10 @@ export convert2, variability_exponent, variability_model, VARIABILITY_SEED,
 
 const DEWDROP_BACKEND = Dewdrop.GPU
 
-convert2(T::Type) = Base.Fix1(convert, T)
-
 include("Variability.jl")
 include("SpatialNetwork.jl")
 include("ModelInterface.jl")
 include("Utils.jl")
-include("Plots.jl")
 include("Sweep.jl")
-
-const stats = (;
-    firing_rate = Dewdrop.firing_rate,
-    susceptibility = Dewdrop.susceptibility,
-    mua = Dewdrop.mua,
-    radial_autocorrelation = Dewdrop.radial_autocorrelation,
-    power_spectrum = Dewdrop.power_spectrum,
-    cv_isi = Dewdrop.cv_isi,
-    temporal_average = Dewdrop.temporal_average,
-    coarsegrain = Dewdrop.coarsegrain,
-    grand_distribution = Dewdrop.grand_distribution,
-    efficiency = Dewdrop.efficiency,
-)
-
 
 end # module

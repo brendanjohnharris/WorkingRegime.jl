@@ -4,7 +4,7 @@
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
-@quickactivate "WorkingRegime"
+@quickactivate :WorkingRegime
 using CairoMakie
 using Fathom
 using TimeseriesTools
@@ -272,17 +272,6 @@ begin # * Save source data
     function save_source_data()
         savedir(x) = joinpath(outdir, x)
 
-        function writegrid(path, X) # (α × β) grids, α down the rows
-            X = permutedims(X, (:α, :β))
-            return writedlm(
-                path,
-                vcat(
-                    hcat("alpha\\beta", permutedims(collect(lookup(X, :β)))),
-                    hcat(collect(lookup(X, :α)), parent(X))
-                ), '\t'
-            )
-        end
-
         function writezig(path, samples) # binned density, as `ziggurat!` computes it
             w = StatsBase.normalize(
                 StatsBase.fit(StatsBase.Histogram, samples, bins); mode = :pdf
@@ -319,7 +308,7 @@ begin # * Save source data
                 savedir("$(prefix)_accuracy.tsv"),
                 [["sampling_accuracy"]; [Δ]], '\t'
             )
-            writegrid(savedir("$(prefix)_diffusion_exponent.tsv"), ma)
+            writegrid(savedir("$(prefix)_diffusion_exponent.tsv"), ma) # (α × β) grids, α down the rows
             writegrid(savedir("$(prefix)_spectral_exponent.tsv"), ms)
             writegrid(savedir("$(prefix)_sampling_accuracy.tsv"), macc)
         end

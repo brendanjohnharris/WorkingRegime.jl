@@ -3,18 +3,6 @@
 #=
 exec julia +1.12 --handle-signals=yes -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-# Spectral-peak variation --- how the LFP oscillatory peak moves with a model parameter.
-#
-# The circuit sweep (circuit_sweep.jl / circuit_exponents.jl) reads the APERIODIC exponents off the
-# per-neuron input current, where the oscillatory component is weak. The LFP --- the mean membrane
-# potential over a local patch of the E sheet, as built in demo_run.jl --- carries a much stronger one.
-#
-# One batched run (B members co-executed over a single shared connectome) sweeps one parameter. Each
-# member records `NPATCH` patch LFPs ON DEVICE through `Aggregate(Trace(:V; of = patch), :mean)`, so
-# the traces cost O(NPATCH·B·nsteps) rather than the O(NE·B·nsteps) a raw `V` trace would --- the whole
-# reason a 32-member LFP sweep fits on one GPU. A 1-component, 1-peak MAPPLE fit to each patch's Welch
-# spectrum gives the peak's centre frequency, FWHM and height against the swept parameter.
-
 using DrWatson
 DrWatson.@quickactivate :WRCircuit
 using JLD2

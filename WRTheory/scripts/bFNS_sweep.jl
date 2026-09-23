@@ -11,7 +11,6 @@ using StochasticDiffEq
 using Distributed
 using AcademicClusters
 WRTheory.@preamble()
-set_theme!(foresight(:physics))
 
 import FractionalNeuralSampling: Density
 

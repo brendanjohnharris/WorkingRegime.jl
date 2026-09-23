@@ -4,7 +4,7 @@
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
-@quickactivate "WorkingRegime"
+@quickactivate :WorkingRegime
 using CairoMakie
 using Fathom
 using Printf
@@ -15,12 +15,11 @@ using DelimitedFiles
 import StatsBase
 
 set_theme!(Fathom.fathom())
-include(joinpath(@__DIR__, "mathlabels.jl")) # mit/unitlabel: symbols in the equation face
 
 begin # * Options
     NAME = "Fig3_effective_theory"
     outdir = plotsdir(NAME)
-    schematic = projectdir("mean_field_schematic.svg")
+    schematic = projectdir("assets", "mean_field_schematic.svg")
     datafile = projectdir("WRTheory", "data", "Fig3_effective_theory.jld2")
 end
 
@@ -220,14 +219,6 @@ begin # * Save source data
         )
 
         # f, h: (α × β) grids with α down the rows and β across the columns
-        function writegrid(path, X)
-            return writedlm(
-                path, vcat(
-                    hcat("alpha\\beta", permutedims(collect(lookup(X, :β)))),
-                    hcat(collect(lookup(X, :α)), parent(X))
-                ), '\t'
-            )
-        end
         writegrid(savedir("panelF_rates.tsv"), rates_αβ)
         writegrid(savedir("panelH_exponents.tsv"), mcs)
 

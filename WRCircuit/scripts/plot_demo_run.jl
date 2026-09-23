@@ -95,7 +95,7 @@ begin  # * Spike raster (E + I)
     # hidedecorations!(ax2)
     linkxaxes!(ax, ax2)
     display(f)
-    save(plotdir("spike_example.pdf"), f)
+    save(plotsdir("spike_example.pdf"), f)
 end
 
 
@@ -132,7 +132,7 @@ begin # * Fano exponent from the neuron-median curve, with a split-half reliabil
 end
 
 begin # * Fano factor statistics
-    open(plotdir("critical_demo", "fano_statistics.txt"), "w") do f
+    open(plotsdir("critical_demo", "fano_statistics.txt"), "w") do f
         write(f, "unified (BIC-selected fit to neuron-median curve): $(fano_fit)\n")
         write(f, "split-half β (odd/even neurons): $(fano_split), Δ = $(abs(-(fano_split...)))\n")
     end
@@ -227,7 +227,7 @@ begin # * Individual statistics
             ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
             align = (:left, :bottom)
         )
-        wsave(plotdir("critical_demo", "$(v)_spectrum.svg"), f)
+        wsave(plotsdir("critical_demo", "$(v)_spectrum.svg"), f)
     end
 
     # * MAD
@@ -253,13 +253,13 @@ begin # * Individual statistics
             ax, 0.1, 0.1; text, fontsize = 16, space = :relative,
             align = (:left, :bottom)
         )
-        wsave(plotdir("critical_demo", "$(v)_mad.svg"), f)
+        wsave(plotsdir("critical_demo", "$(v)_mad.svg"), f)
     end
 end
 
 
 begin # * Statistics
-    open(plotdir("critical_demo", "statistics.txt"), "w") do f
+    open(plotsdir("critical_demo", "statistics.txt"), "w") do f
         for v in keys(spectra)
             println(f, "\n=== Variable: $(v) ===")
             println(f, "-- Spectrum fit --")
@@ -656,8 +656,8 @@ begin # * Additional properties: image and distribution fit
     colsize!(g, 1, Relative(0.35))
 
     display(mf)
-    wsave(plotdir("critical_demo", "key_properties.png"), mf)
-    wsave(plotdir("critical_demo", "key_properties.pdf"), mf)
+    wsave(plotsdir("critical_demo", "key_properties.png"), mf)
+    wsave(plotsdir("critical_demo", "key_properties.pdf"), mf)
 end
 
 # # * Check against fooof

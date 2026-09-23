@@ -4,7 +4,7 @@
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
-@quickactivate "WorkingRegime"
+@quickactivate :WorkingRegime
 using JLD2
 using CairoMakie
 using Fathom
@@ -20,7 +20,6 @@ using Printf
 import ImageMagick # rasterises brain.pdf in pdfpanel!
 
 set_theme!(Fathom.fathom())
-include(joinpath(@__DIR__, "mathlabels.jl")) # mit/mrm/unitlabel: symbols in the equation face
 
 const NAME = "Fig1_combined_curves"
 const outdir = plotsdir(NAME)
@@ -43,29 +42,17 @@ mkpath(outdir)
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-"Bootstrap median + 95% CI. Local copy so this script needs no Bootstrap.jl (as combined_curves.jl does)."
-function percentilebootmedian(x; N = 10_000, α = 0.05)
-    x = filter(!isnan, collect(skipmissing(x)))
-    isempty(x) && return (NaN, (NaN, NaN))
-    rng = Random.MersenneTwister(42)
-    n = length(x)
-    meds = [median(x[rand(rng, 1:n, n)]) for _ in 1:N]
-    return median(x), Tuple(quantile(meds, (α / 2, 1 - α / 2)))
-end
-
-_select(x, sels::Pair...) = getindex(x; (Symbol(n) => At(v) for (n, v) in sels)...)
-
 """
     pdfpanel!(gp, pdf; dpi = 600)
 
-`pdf` rendered at `dpi` into a decoration-free axis, cached as a png in `data/` and re-rendered
+`pdf` rendered at `dpi` into a decoration-free axis, cached as a png in `assets/` and re-rendered
 whenever the PDF is newer. Rasterised by ImageMagick; the resolution must be set on the wand
 BEFORE reading, since a bare `FileIO.load` renders PDFs at 72 dpi. MakieTeX's `PDFDocument` would
 keep the artwork vector, but its newest release (0.4.3) pins Makie 0.21 against this project's
 0.24, so it cannot resolve here; the brain render is embedded raster anyway, so nothing is lost.
 """
 function pdfpanel!(gp, pdf; dpi = 600, flipx = false, kwargs...)
-    png = datadir(first(splitext(basename(pdf))) * ".png")
+    png = projectdir("assets", first(splitext(basename(pdf))) * ".png")
     if !isfile(png) || mtime(png) < mtime(pdf)
         wand = ImageMagick.MagickWand()
         ccall(
@@ -309,7 +296,7 @@ end
 
 """
 Excess kurtosis annotated on the panel: the median across sessions of each session's median over its
-own L2/3 channels --- the two-stage aggregation `collect_surrogates.jl` uses, so the number printed
+own L2/3 channels --- the two-stage aggregation `save_surrogate_statistics` (Fig 4) uses, so the number printed
 here is the one the main text quotes. Falls back to the flat per-channel median for caches written
 before `kurtosis_session` existed; that pooled form weights sessions by channel count and reads
 higher, which is what made the panel and the text disagree.
@@ -687,9 +674,6 @@ begin # * Render
     # narrower than the rows above and no longer align with them --- deliberate. Only the left side
     # is switched: a full `Outside` would pull the titles and xlabels inside the cell too and
     # squash the row's height.
-    blocklabel(gp, text) = Label(
-        gp, text; rotation = pi / 2, font = :bold, fontsize = 18, tellheight = false
-    )
     lab_exp = blocklabel(f[1, 0], "Experiment")
     lab_cir = blocklabel(f[2, 0], "Circuit model")
     box_exp = groupbox(gtop[1, 1:3], baikal)
@@ -697,17 +681,6 @@ begin # * Render
     # and ticks, so this row protrudes ~50 pt further than the other. The same value on the blue box
     # would carry it off the top of the page.
     box_cir = groupbox(gmid[1, 1:2], bermejo; fillalpha = 0.03, top = -86)
-    # A blocklabel is centred on its row's CELL; the box reaches past that cell by different amounts
-    # above and below (56 pt down, 34 or 86 up), so the two centres differ. Translate the label onto
-    # the box --- after `addlabels!`, which re-solves the layout.
-    centre_on_box!(lab, box) = let b = lab.layoutobservables.computedbbox[],
-            d = box.layoutobservables.computedbbox[]
-
-        Makie.translate!(
-            lab.blockscene, 0,
-            (d.origin[2] + d.widths[2] / 2) - (b.origin[2] + b.widths[2] / 2), 0
-        )
-    end
 
     # Top: brain illustration | LFP + raster | increment distribution
     # (a) carries no ylabel or xlabel, so the protrusion bands its neighbours fill with "Time (s)"
@@ -715,7 +688,7 @@ begin # * Render
     # left to its own panel letter, right into the column gap, down into the xlabel band --- which
     # costs (b) and (c) nothing. The top is left alone so the title stays outside.
     ax_brain = pdfpanel!(
-        gtop[1, 1], projectdir("brain.pdf"); title = "Mouse brain", flipx = true,
+        gtop[1, 1], projectdir("assets", "brain.pdf"); title = "Mouse brain", flipx = true,
         # Shifted left by widening the left reach and insetting the right by the same amount, so the
         # drawn width is unchanged. The limit is the group box's left border (x = 10), not the panel
         # letter, which sits above the brain's top edge and so never meets it.
@@ -785,6 +758,9 @@ begin # * Render
             (d.origin[1] + d.widths[1] / 2) - (b.origin[1] + b.widths[1] / 2), 0, 0
         )
     end
+    # A blocklabel is centred on its row's CELL; the box reaches past that cell by different amounts
+    # above and below (56 pt down, 34 or 86 up), so the two centres differ. Translate the label onto
+    # the box --- after `addlabels!`, which re-solves the layout.
     centre_on_box!(lab_exp, box_exp)
     centre_on_box!(lab_cir, box_cir)
     display(f)

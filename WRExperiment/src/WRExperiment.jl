@@ -29,14 +29,13 @@ include("VisualCoding.jl")
 
 # Public API for the scripts (replaces what they used to get from `using SpatiotemporalMotifs`).
 # `Unit` is re-exported from AllenNeuropixelsBase; the rest are vendored/defined here.
-export structures, layers, PTHR, hierarchy_scores, THETA, GAMMA, bootstrapmedian, val_to_string,
-    calcquality, calcdir, savepath, SessionID, Trial, Structure, Unit, CLUSTER, DEFAULT_SESSION_ID,
-    hierarchicalkendall, mediankendallpvalue, sessionkendall, sessionmatrix, bhadjust, @preamble,
+export structures, layers, PTHR, hierarchy_scores, bootstrapmedian, val_to_string,
+    calcquality, savepath, SessionID, Trial, Structure, Unit, DEFAULT_SESSION_ID,
+    sessionkendall, sessionmatrix, bhadjust, @preamble,
     send_madev, formatlfp, LFP_TOLERANCES, produce_unitdepths, madev, mapple_fit, diffusion_fit, diffusion_line, diffusion_knee,
     confirm_band_before_knee, fano_factor, rates, plotspectrum!,
     parselayernum, commondepths, channellayers,
-    madev_taus, surrogate_null, surrogatep, surrogatez,
-    surrogate_diffusion_exponent, surrogate_kurtosis, lfp_surrogate_stats, send_surrogates,
+    madev_taus, surrogate_null, lfp_surrogate_stats, send_surrogates,
     variability_exponent, variability_model, VARIABILITY_SEED, VARIABILITY_PINS,
     VARIABILITY_WIDTH, VARIABILITY_NOFIT,
     unitids, VISUAL_CODING_FC, VISUAL_CODING_BO, VISUAL_CODING_STIMULUS, visual_coding_sessions,

@@ -4,7 +4,7 @@
 exec julia +1.12 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
 using DrWatson
-@quickactivate "WorkingRegime"
+@quickactivate :WorkingRegime
 using CairoMakie
 using Fathom
 using TimeseriesTools
@@ -14,7 +14,6 @@ import StatsBase
 import Fathom: crimson, cornflowerblue, cucumber, california # Foresight-era names, unexported by Fathom
 
 set_theme!(Fathom.fathom()) # LaTeXStrings render in STIX Two serif by Fathom default
-include(joinpath(@__DIR__, "mathlabels.jl")) # mit/mrm/unitlabel: symbols in the equation face
 # Legends one point below the theme's 14, for this figure only: it carries several, some of them
 # inside small inset panels. Set on the theme rather than on each `axislegend` call. Fathom's
 # Legend block sets framevisible, padding, patchcolor and titlefont but no sizes, so both label and
@@ -73,9 +72,6 @@ begin # * Set up figure
     # Vertical block labels outside the boxes, in a new column 0 of g_main: they push only the
     # boxed rows' content right, leaving the summary row (a separate layout) at full width, so the
     # left edges of the two no longer align --- deliberate.
-    blocklabel(gp, text) = Label(
-        gp, text; rotation = pi / 2, font = :bold, fontsize = 18, tellheight = false
-    )
     lab_space = blocklabel(g_main[1, 0], "Space-fractional")
     lab_time = blocklabel(g_main[2, 0], "Time-fractional")
     box_space, box_time = if order_rows
@@ -339,17 +335,6 @@ begin # * Panels g, h --- exponent maps over (α, β) for the flat sampler
             (d.origin[1] + d.widths[1] / 2) - (b.origin[1] + b.widths[1] / 2), 0, 0
         )
     end
-    # Same correction, vertically: a blocklabel is centred on its row's CELL, but the group box
-    # reaches past that cell by different amounts above and below (38 pt up, 54 or 66 down), so the
-    # two centres differ by 8--14 pt.
-    centre_on_box!(lab, box) = let b = lab.layoutobservables.computedbbox[],
-            d = box.layoutobservables.computedbbox[]
-
-        Makie.translate!(
-            lab.blockscene, 0,
-            (d.origin[2] + d.widths[2] / 2) - (b.origin[2] + b.widths[2] / 2), 0
-        )
-    end
     colsize!(g_sum, 3, Auto(1.18)) # map columns wide enough for their full-size titles
     colsize!(g_sum, 4, Auto(1.18))
     colgap!(g_sum, 10)
@@ -397,6 +382,9 @@ begin # * Save figure
     # centring measured before it is stale by exactly that much.
     centre_on_axis!(labg, axg)
     centre_on_axis!(labh, axh)
+    # Same correction, vertically: a blocklabel is centred on its row's CELL, but the group box
+    # reaches past that cell by different amounts above and below (38 pt up, 54 or 66 down), so the
+    # two centres differ by 8--14 pt.
     centre_on_box!(lab_space, box_space)
     centre_on_box!(lab_time, box_time)
     wsave(joinpath(outdir, "$NAME.pdf"), f)
@@ -479,17 +467,7 @@ begin # * Save source data
             [["a" "b"]; [a_exponent b_exponent]], '\t'
         )
 
-        function writegrid(path, X) # g, h: (α × β) grids, α down the rows
-            X = permutedims(X, (:α, :β))
-            return writedlm(
-                path,
-                vcat(
-                    hcat("alpha\\beta", permutedims(collect(lookup(X, :β)))),
-                    hcat(collect(lookup(X, :α)), parent(X))
-                ), '\t'
-            )
-        end
-        writegrid(savedir("panelG_diffusion_exponent.tsv"), ma)
+        writegrid(savedir("panelG_diffusion_exponent.tsv"), ma) # g, h: (α × β) grids, α down the rows
         writegrid(savedir("panelH_spectral_exponent.tsv"), ms)
 
         vs = map(configs) do c # right column: the four windowed traces, shared time base

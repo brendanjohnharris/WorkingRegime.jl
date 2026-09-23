@@ -12,8 +12,6 @@ import ProgressLogging: @withprogress, @logprogress
 import DimensionalData
 import Dates: TimeType
 import Bootstrap
-import MultipleTesting: adjust, BenjaminiHochberg
-import HypothesisTests: MannWhitneyUTest, SignedRankTest, pvalue
 
 # Band over which the spectral exponent is fit, IN HERTZ. The upper edge is the acquisition
 # anti-aliasing corner, NOT the Nyquist frequency: the Allen LFP is stored at 1250 Hz (Nyquist
@@ -564,9 +562,6 @@ const hierarchy_scores = Dict(
     "VISp" => -0.357, "VISl" => -0.093, "VISrl" => -0.059,
     "VISal" => 0.152, "VISpm" => 0.327, "VISam" => 0.441
 )  # anatomical hierarchy, Siegle 2021
-THETA() = (3, 10)   # SM used a preference-overridable getpref; WRExperiment just needs the defaults
-GAMMA() = (30, 100)
-CLUSTER() = get(ENV, "SM_CLUSTER", "false") == "true"   # are we running on the cluster?
 const DEFAULT_SESSION_ID = 1140102579
 
 function commondepths(depths)
@@ -625,122 +620,6 @@ has_keys(D, required_keys) = all(haskey.([D], required_keys))
 
 # bootstrapmedian is reused from TimeseriesTools (BCa CI via its BootstrapExt, active since we load Bootstrap);
 # re-exported from WRExperiment. Returns (; average, confint=(; lower, upper)) --- destructures as μ,(σl,σh).
-
-# Hierarchy correlation (Kendall τ vs anatomical hierarchy), vendored from SpatiotemporalMotifs. Used by
-# collect_calculations (diffusion_hierarchical) and madev. Bootstrap.jl → BCa CIs; permutation p-values.
-function hierarchicalkendall(
-        x::AbstractVector{<:Real}, y::AbstractDimArray,
-        mode::Symbol = :group; kwargs...
-    )
-    hasdim(y, Depth) || throw(ArgumentError("Argument 2 should have a Depth dimension"))
-    hasdim(y, SessionID) || throw(ArgumentError("Argument 2 should have a SessionID dimension"))
-    hasdim(y, Structure) || throw(ArgumentError("Argument 2 should have a Structure dimension"))
-    return hierarchicalkendall(x, y, Val(mode); kwargs...)
-end
-function pairedkendall(xy)
-    x = first.(xy)
-    y = last.(xy)
-    notnan = .!(isnan.(y) .| isnan.(x))
-    return corkendall(x[notnan], y[notnan])
-end
-function _hierarchicalkendall(xx, yy; N = 10000, confint = 0.95, seed = 42)
-    b = Bootstrap.bootstrap(pairedkendall, collect(zip(xx, yy)), Bootstrap.BalancedSampling(N))
-    μ, σ... = only(Bootstrap.confint(b, Bootstrap.BCaConfInt(confint)))
-    nsesh = hasdim(yy, SessionID) ? size(yy, SessionID) : 1
-    rng = MersenneTwister(seed)
-    μsur = map(1:N) do _
-        idxs = stack(randperm(rng, size(yy, Structure)) for _ in 1:nsesh)
-        idxs = yy isa AbstractMatrix ? idxs' : idxs[:]
-        ys = view(yy, idxs)   # a different shuffle per session
-        @assert size(xx) == size(ys)
-        pairedkendall(collect(zip(xx, ys)))
-    end
-    # Add-one estimator: a permutation p-value of exactly zero is not a valid quantity, and
-    # the old `mean(abs(μ) .< abs(μsur))` returned one whenever no permutation exceeded it.
-    𝑝 = (1 + count(abs.(μsur) .>= abs(μ))) / (N + 1)
-    return μ, σ, 𝑝
-end
-"""
-Pooled ("group-level") Kendall 𝜏: every (hierarchy, exponent) point across sessions goes into one
-correlation per depth.
-
-!!! warning "Superseded"
-    Retired from the figures in favour of [`sessionkendall`](@ref), which correlates within session
-    and so is not attenuated by between-session variance (pooled 𝜏 for the spectral exponent at L2/3
-    is 0.38 against 0.60 within-session). Kept only for the legacy plotting scripts
-    `scripts/plots/madev.jl` and `scripts/plots/hierarchy_tau.jl`, and for the 𝜏 values
-    `collect_calculations.jl` still stores for the latter. Do not use it in new analyses.
-"""
-function hierarchicalkendall(x::AbstractVector{<:Real}, y::AbstractDimArray, ::Val{:group}; kwargs...)
-    y = permutedims(y, (Depth, SessionID, Structure))
-    xx = repeat(x', size(y, SessionID), 1)
-    ms = asyncmap(eachslice(y, dims = Depth)) do yy
-        _hierarchicalkendall(xx, yy; kwargs...)
-    end
-    𝑝 = last.(ms)
-    𝑝 = set(𝑝, adjust(collect(𝑝), BenjaminiHochberg()))
-    return first.(ms), getindex.(ms, 2), 𝑝
-end
-"""
-Per-session Kendall 𝜏 over a `Depth` x `SessionID` x `Structure` array.
-
-!!! warning "Superseded"
-    Never wired into a figure, and unusable as written: it calls `corkendall` without masking
-    `NaN`, so any missing area returns `NaN`; it requires a `Depth` dimension, while both published
-    panels are indexed by layer; it applies no minimum-coverage guard; and its `SignedRankTest`
-    compares the observed 𝜏 against a *single* random permutation per session rather than against a
-    null distribution. Use [`sessionkendall`](@ref).
-"""
-function hierarchicalkendall(x::AbstractVector{<:Real}, y::AbstractDimArray, ::Val{:individual})
-    y = permutedims(y, (Depth, SessionID, Structure))
-    ms = asyncmap(eachslice(y, dims = Depth)) do yy
-        mnms = map(eachslice(yy, dims = SessionID)) do yyy
-            μ = corkendall(x, yyy)
-            s = begin
-                idxs = randperm(length(yyy))
-                corkendall(x, yyy[idxs])
-            end
-            return μ, s
-        end
-        μ = first.(mnms)
-        s = last.(mnms)
-        σ = (percentile(μ, 25), percentile(μ, 75))
-        𝑝 = SignedRankTest(convert(Vector{Float64}, μ), convert(Vector{Float64}, s)) |> pvalue
-        μ = median(μ)
-        return μ, σ, 𝑝
-    end
-    𝑝 = last.(ms)
-    𝑝 = set(𝑝, adjust(collect(𝑝), BenjaminiHochberg()))
-    return first.(ms), getindex.(ms, 2), 𝑝
-end
-"""
-Median per-session Kendall 𝜏 with a bootstrap interval and a rank-sum test against pooled
-surrogates.
-
-!!! warning "Superseded"
-    The test is mis-specified: `MannWhitneyUTest` compares `n_sessions` observations against
-    `N * n_sessions` surrogates as two independent samples, which is not a test of "median 𝜏 = 0"
-    and discards the session pairing the surrogates were built to respect. Kept for
-    `scripts/plots/madev.jl`. Use [`sessionkendall`](@ref).
-"""
-function mediankendallpvalue(x::AbstractVector, Y::AbstractMatrix; N = 10000)
-    τ = map(eachslice(collect(Y), dims = 2)) do y
-        notnan = .!isnan.(y)
-        corkendall(x[notnan], y[notnan])
-    end
-    τsur = asyncmap(1:N) do _
-        idxs = randperm(length(x))
-        map(eachslice(collect(Y), dims = 2)) do y
-            notnan = .!isnan.(y)
-            corkendall(x[idxs][notnan], y[notnan])
-        end
-    end
-    τsur = vcat(τsur...)
-    tst = MannWhitneyUTest(τ[:], τsur[:])
-    𝑝 = tst |> pvalue
-    mtau, ci = bootstrapmedian(collect(τ .+ randn(length(τ)) .* eps()))
-    return (; τ = mtau, ci, 𝑝, U = tst.U, n = length(x), N)
-end
 
 val_to_string(v) = v isa Regex ? v.pattern : string(v)
 const allowedtypes = (Real, String, Regex, Symbol, TimeType, Vector, Tuple)
