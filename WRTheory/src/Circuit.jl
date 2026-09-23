@@ -1,4 +1,5 @@
 import FractionalNeuralSampling.Samplers: gen_lfsm_fns
+using StochasticDiffEqRODE: RandomEM # moved out of StochasticDiffEq in v7, which no longer re-exports it
 
 export NeuronSampler, fano_factor
 

@@ -31,7 +31,7 @@ exec julia +1.13 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 
 using DrWatson
 @quickactivate "WRExperiment"
-import WRExperiment: variability_exponent, rootdatadir  # named import: the script defines its own `structures` etc.
+import WRExperiment: variability_exponent, rootdatadir, VARIABILITY_NOFIT  # named import: the script defines its own `structures` etc.
 using JLD2
 using DataFrames
 using TimeseriesTools

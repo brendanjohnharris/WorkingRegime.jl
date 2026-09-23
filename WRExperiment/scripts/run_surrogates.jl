@@ -16,6 +16,8 @@ using DimensionalData
 using FileIO
 using JLD2
 import AllenNeuropixelsBase as AN
+import TimeseriesTools: FFTW
+FFTW.set_num_threads(1)   # FFTW's own threads segfault under -t auto; see fftw-threads-segfault
 
 method = isempty(ARGS) ? :ft : Symbol(first(ARGS)) # :ft (default) or :iaaft
 path = rootdatadir(method === :iaaft ? "surrogates" : "surrogates_$(method)") # also the `outpath` below: one folder for the check and the writes
@@ -52,6 +54,8 @@ if !isempty(params)
                 Pkg.instantiate()
                 import AllenNeuropixelsBase as AN
                 using WRExperiment
+                import TimeseriesTools: FFTW
+                FFTW.set_num_threads(1)
                 WRExperiment.send_surrogates(
                     $o, $stimulus, $structure; n = 20, method = $(QuoteNode(method)), outpath = $path
                 )
