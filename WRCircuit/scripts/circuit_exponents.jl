@@ -3,18 +3,6 @@
 #=
 exec julia +1.13 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 =#
-# Circuit sweep — exponent extraction.
-#
-# The sweep (scripts/circuit_sweep.jl) writes one result file per (plane cell, seed), each named for exactly
-# its two swept axes + seed. This script groups files back into FIVE 2-D planes through the working-regime
-# point --- a file's non-seed key set IS its plane:
-#   - dg  plane: (delta, Delta_g_K)   - ds plane: (delta, sigma_ee)   - gs plane: (Delta_g_K, sigma_ee)
-#   - td  plane: (tau_r_e, tau_d_e)   - dtd plane: (delta, tau_d_e)
-# For each plane we fit the per-neuron diffusion exponent (from the input MAD) and spectral exponent (from the
-# input PSD) and save *all* per-neuron exponents (not neuron-averages) to data/WRCircuit/circuit_exponents.jld2, KEEPING
-# THE SEED AXIS EXPLICIT: every saved grid is (axis1, axis2, seed) of per-neuron exponent vectors, so
-# downstream scripts collapse the seed 'Obs' dimension as they wish.
-
 using DrWatson
 DrWatson.@quickactivate :WRCircuit
 using JLD2
@@ -56,7 +44,7 @@ try
     # of its seeds produced a sweep file; blanked points become empty vectors -> NaN in every heatmap.
     N_REQUIRED = 5
 
-    # Which planes to (re)compute. ONLY these are fit (the multi-hour cost) and written; every other plane
+    # Which planes to (re)compute. ONLY these are fit (multi-hour run time) and written; every other plane
     # already in circuit_sweep.jld2 is preserved
     PLANES = [:dg] # [:dg, :ds, :gs, :td, :dtd]
     want(p) = p in PLANES

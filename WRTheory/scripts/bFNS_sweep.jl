@@ -17,7 +17,7 @@ import FractionalNeuralSampling: Density
 begin # * Add procs
     AcademicClusters.USydPhysics.distributeprocs(
         66; ncpus = 1, mem = "6GB", walltime = "23:00:00",
-        hpcs = ["cartman", "karl"] # orr SIGKILLs julia a few seconds into `using TimeseriesTools`
+        hpcs = ["cartman", "karl"]
     )
 
     @everywhere using WRTheory
