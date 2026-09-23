@@ -15,7 +15,7 @@ using ForwardDiff
 using Fathom
 using CairoMakie
 WRCircuit.@preamble
-set_theme!(Fathom.fathom(:physics))
+set_theme!(Fathom.fathom())
 
 begin
     @info "Loading data"
