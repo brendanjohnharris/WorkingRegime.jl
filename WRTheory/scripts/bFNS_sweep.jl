@@ -15,16 +15,12 @@ WRTheory.@preamble()
 import FractionalNeuralSampling: Density
 
 begin # * Add procs
-    AcademicClusters.USydPhysics.addprocs(
-        24; ncpus = 1, mem = "6GB", walltime = "23:00:00",
-        queue = `taiji`
-    )
-    AcademicClusters.USydPhysics.addprocs(32; ncpus = 1, mem = "6GB", walltime = "23:00:00")
-    addprocs(10) # Local
+    AcademicClusters.USydPhysics.distributeprocs(66; ncpus = 1, mem = "6GB", walltime = "23:00:00")
 
     @everywhere using WRTheory
     @everywhere using FractionalNeuralSampling
     @everywhere using MoreMaps
+    @everywhere (import FFTW; FFTW.set_num_threads(1)) # FFTW's own threads segfault under -t auto
 end
 
 # * The aim is to sweep over alpha, beta, and eta
@@ -75,7 +71,7 @@ begin # * One sweep per test potential. γ is set per sweep: bFNS_data.jl reads 
         end |> Dict{String, Any}
         out["params"] = params
         file = rootdatadir("bFNS_sweep", "$(density)_γ=$(γ)_η=$(η).jld2")
-        tagsave(file, out) # overwrites; safe = true would divert a rerun to a `_#1` copy nothing reads
+        tagsave(file, out)
         file
     end
 end
