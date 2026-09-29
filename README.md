@@ -1,28 +1,38 @@
 # WorkingRegime.jl
-<!-- Structure: summary (headline; each module and the packages behind it; how to reproduce), then setup, data production in run order, figure production. -->
 
-WorkingRegime.jl reproduces the analyses and figures of the working-regime study, which measures three scaling exponents of cortical dynamics in neural recordings, a spiking circuit model and a fractional neural sampling theory. The exponents are the diffusion exponent `a`, from the mean absolute deviation of increments; the spectral exponent `b`, the aperiodic power-spectrum slope; and the variability exponent `c`, the scaling of spike-count Fano factors. The repository is a Julia workspace of three modules and a root package. [`WRExperiment/`](WRExperiment/) measures the exponents in local field potentials and single units from mouse visual cortex (Allen Visual Behavior Neuropixels, with the Visual Coding functional-connectivity cohort as a replication), reading the data through [AllenNeuropixelsBase.jl](https://github.com/brendanjohnharris/AllenNeuropixelsBase.jl), fitting exponents with [TimeseriesTools.jl](https://github.com/brendanjohnharris/TimeseriesTools.jl) and building surrogate nulls with [TimeseriesSurrogates.jl](https://github.com/JuliaDynamics/TimeseriesSurrogates.jl). [`WRCircuit/`](WRCircuit/) simulates a spatial spiking circuit on GPU with [Dewdrop.jl](https://github.com/brendanjohnharris/Dewdrop.jl) and sweeps its parameters. [`WRTheory/`](WRTheory/) simulates fractional neural samplers with [FractionalNeuralSampling.jl](https://github.com/brendanjohnharris/FractionalNeuralSampling.jl). The root package draws the figures: the scripts in [`scripts/`](scripts/) use CairoMakie with [Fathom.jl](https://github.com/brendanjohnharris/Fathom.jl), and share helpers from [`src/WorkingRegime.jl`](src/WorkingRegime.jl). To reproduce the analyses, (a) run each module's calculation scripts in the order given under [Producing the data](#producing-the-data), then (b) run `bash make_plots`, which draws every figure from the data those scripts write.
+WorkingRegime.jl reproduces the analyses and figures of the working-regime study. We measure three scaling exponents of cortical dynamics in neural recordings and compute the same exponents for a spiking circuit model and a fractional neural sampling theory:
+- the diffusion exponent `a`, from the mean absolute deviation of increments;
+- the spectral exponent `b`, the aperiodic slope of the power spectrum;
+- the variability exponent `c`, from the scaling of spike-count Fano factors.
+
+The repository is a Julia workspace of three modules and a root package:
+- [`WRExperiment/`](WRExperiment/) measures the exponents in local field potentials and single units from mouse visual cortex, using the Allen Visual Behavior Neuropixels dataset with the Visual Coding functional-connectivity cohort for replication. The module's scripts read the data through [AllenNeuropixelsBase.jl](https://github.com/brendanjohnharris/AllenNeuropixelsBase.jl), fit exponents with [TimeseriesTools.jl](https://github.com/brendanjohnharris/TimeseriesTools.jl) and build surrogate nulls with [TimeseriesSurrogates.jl](https://github.com/JuliaDynamics/TimeseriesSurrogates.jl).
+- [`WRCircuit/`](WRCircuit/) simulates a spatial spiking circuit on GPU with [Dewdrop.jl](https://github.com/brendanjohnharris/Dewdrop.jl) and sweeps its parameters.
+- [`WRTheory/`](WRTheory/) simulates fractional neural samplers with [FractionalNeuralSampling.jl](https://github.com/brendanjohnharris/FractionalNeuralSampling.jl).
+- The root package draws the figures. The scripts in [`scripts/`](scripts/) use CairoMakie with [Fathom.jl](https://github.com/brendanjohnharris/Fathom.jl) and share helpers from [`src/WorkingRegime.jl`](src/WorkingRegime.jl).
+
+To reproduce the figures, run each module's calculation scripts in the order given under [Producing the data](#producing-the-data), then run `bash make_plots`.
 
 # Setup
 
-The scripts need Julia 1.13, which they call as `julia +1.13` through [juliaup](https://github.com/JuliaLang/juliaup). From the repository root:
+The scripts call Julia 1.13 as `julia +1.13`, which selects the 1.13 channel of [juliaup](https://github.com/JuliaLang/juliaup). From the repository root:
 ```bash
-juliaup add 1.13   # installs the 1.13 channel that `julia +1.13` selects
+juliaup add 1.13
 julia +1.13 --project -e 'using Pkg; Pkg.instantiate()'
 ```
 `Pkg.instantiate()` resolves and installs the root project and all three workspace members, which share one `Manifest.toml`.
 
-The experimental steps read the Allen data through [AllenNeuropixelsBase.jl](https://github.com/brendanjohnharris/AllenNeuropixelsBase.jl), whose cache directory is set as the `datadir` preference in a root `LocalPreferences.toml`:
+The experiment scripts read the Allen data through [AllenNeuropixelsBase.jl](https://github.com/brendanjohnharris/AllenNeuropixelsBase.jl). Set the Allen data cache with the `datadir` preference in a root `LocalPreferences.toml`:
 ```toml
 [AllenNeuropixelsBase]
 datadir = "/path/to/allen/cache"
 ```
 
-Since every script is executable through its `bash` header and activates its own project, each can be run as `bash path/to/script.jl` from anywhere. Hand-made figure inputs (the brain illustration, the visual-cortex map and the mean-field schematic) live in [`assets/`](assets/).
+Every script has a `bash` header and activates its own project, so it runs from any directory as `bash path/to/script.jl`. Hand-made figure inputs (the brain illustration, the visual-cortex map and the mean-field schematic) are in [`assets/`](assets/).
 
 # Producing the data
 
-The three groups below are independent of one another; within a group, run the steps in order. Files read by a figure (those whose *Used by* names one) are written to `data/<Module>/` at the repository root; the rest are intermediates, kept in each package's own `data/` directory. Steps marked *cluster* use cluster jobs or workers when run on the USyd Physics cluster (or NCI Gadi, for the circuit sweep) and local workers otherwise; steps marked *GPU* need a CUDA device.
+The three groups below are independent, but the steps within each group must be run in order. Figure inputs, the files whose *Used by* entry names a figure, are written to `data/<Module>/` at the repository root. Intermediates stay in each module's own `data/` directory. Steps marked *cluster* use cluster jobs or workers on the USyd Physics cluster (or NCI Gadi, for the circuit sweep) and local workers elsewhere. Steps marked *GPU* need a CUDA device.
 
 ## Experiment ([`WRExperiment/scripts/`](WRExperiment/scripts/))
 
@@ -36,7 +46,7 @@ The three groups below are independent of one another; within a group, run the s
 | 6 | `run_calculations_visual_coding.jl` (*cluster*) | `calculations_visual_coding_fc/` | step 7 |
 | 7 | `collect_calculations_visual_coding.jl` | `visual_coding_fc.jld2`, `visual_coding_increments_fc.jld2` | Fig S1 |
 
-Since steps 6 and 7 carry their own session list, they do not need step 1.
+Steps 6 and 7 carry their own session list and do not need step 1.
 
 ## Circuit model ([`WRCircuit/scripts/`](WRCircuit/scripts/))
 
@@ -59,11 +69,11 @@ Since steps 6 and 7 carry their own session list, they do not need step 1.
 
 # Producing the figures
 
-The figure inputs are also deposited on Zenodo (DOI to be added), one archive per module; unpacking each archive into `data/` replaces running the steps above. Once the data exist, draw the figures with:
+The figure inputs are deposited on FigShare as one archive per module. Unpacking the archives into `data/` replaces the calculation steps above. With the data in place, draw the figures with:
 ```bash
 bash make_plots
 ```
-`make_plots` runs every figure script in [`scripts/`](scripts/) in figure order. Each script writes to `plots/<script name>/`: the figure (or video), and, for figures, the source data behind each panel as tab-separated files.
+`make_plots` runs every figure script in [`scripts/`](scripts/), in figure order. Each script writes its figure or video to `plots/<script name>/`, and each figure script also writes the source data for every panel there as tab-separated files.
 
 | Script | Figure |
 |---|---|

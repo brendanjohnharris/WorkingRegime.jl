@@ -181,7 +181,7 @@ end
 begin # * Figure input: every seed's exponents as plain arrays (Fig 1 statistics)
     ds = load.(files)
     conditions = string.(lookup(first(ds)["a"], :condition))
-    a_curve = permutedims(stack(parent(d["a_curve"]) for d in ds)) # seed × condition
+    a_curve = permutedims(stack(parent(d["a_curve"]) for d in ds)) # seed x condition
     tagsave(
         rootdatadir("synchrony_surrogates.jld2"), Dict(
             "seeds" => collect(seeds), "conditions" => conditions, "tmax_s" => ustrip(u"s", tmax), "frac" => frac,
