@@ -137,9 +137,10 @@ function fanolayercurve(blocks, layernum, ftaus; structure = nothing)
 end
 
 """
-Fano curves (bin widths × units) for the units of one block assigned to `layernum`, or `nothing`
-when too few carry a curve. Unit layers come from the block's own channel layer map, read at each
-unit's probe depth --- the same construction `collect_calculations.jl` uses for Visual Behaviour.
+Fano curves (bin widths × units) for the units of one block assigned to `layernum` that pass
+`goodunit`, or `nothing` when too few carry a curve. Unit layers come from the block's own channel
+layer map, read at each unit's probe depth --- the same construction `collect_calculations.jl` uses
+for Visual Behaviour.
 """
 function unitfano(d, layernum, ftaus)
     ud = d.unitdepths
@@ -149,7 +150,7 @@ function unitfano(d, layernum, ftaus)
     sel = Int[]
     for (u, pd) in enumerate(ud.probedepth)
         j = argmin(abs.(depths .- pd))
-        lay[j] == layernum && ud[u, :].fano_factor isa AbstractVector && push!(sel, u)
+        lay[j] == layernum && ud[u, :].fano_factor isa AbstractVector && goodunit(ud[u, :]) && push!(sel, u)
     end
     length(sel) < MIN_FANO_CHANNELS && return nothing
     return reduce(hcat, [Float64.(collect(ud[u, :].fano_factor)) for u in sel])

@@ -207,6 +207,8 @@ craw = jldopen(
         "E_spike" => f["E_spike"], "epositions" => f["epositions"]
     )
 end
+# Input synchrony surrogates (WRCircuit/scripts/synchrony_surrogates.jl); statistics only, not drawn
+sync = jldopen(f -> Dict(k => f[k] for k in keys(f)), datadir("WRCircuit", "synchrony_surrogates.jld2"))
 
 const N_GRID = craw["N"]
 const DX = craw["fixed_params"].dx
@@ -221,45 +223,55 @@ const DT_MS = TIME_MS[2] - TIME_MS[1]           # ~0.1 ms; sample counts are NOT
 const YSPACE = 26.0
 const YSPACE_D = 30.0
 
-# The field window drawn in (d), chosen by searching the whole saved trace for a stretch that (i)
-# never crosses the periodic boundary and stays clear of the edges, and (ii) whose central neuron's
-# input current shows the characteristic large excursions without dominating the trace: four crossings
-# of 1.5 nA peaking at 2.6 nA (a burstier window reached 4.2 nA and clipped the axis), with a path
-# length of 290 grid units. Computed here rather than inside the panel because the patch, the traced
-# neuron and the trace window are all defined from it.
-#
-# Re-picked by sweeping every window in the trace against both criteria at once, scoring the bump
-# against the patch centre each window implies (the patch follows the trajectory end, so a fixed
-# centre scores candidates wrongly). Only 21 windows are seam-free with >= 8 grid units of edge
-# clearance and a wide sweep; this one has the strongest bump among them. Against the stretch the
-# original search returned, the track is longer (extent 66 against 52 grid units, path 422 against
-# 289) and the bump is no longer invisible: mean input inside the patch 1.28 nA against 0.04
-# outside, where before it was 0.33 against 0.10. Landing on the field's rare flares instead gives
-# a far brighter bump but a short, tangled track --- the two maxima are anticorrelated.
-const FIELD_TINDEX = 41_921
+# The field window drawn in (d), picked from a sweep of the demo run for a track that mixes local
+# diffusion with large jumps, ends on a clear bump, and gives (e) a trace with a few large deviations
+# rather than a sustained burst. The COM is scored in 5 ms blocks: a block moving > 12 grid units is
+# a hop, and runs of >= 2 non-hop blocks are dwells. Kept: final frames in the top 10% of bump
+# contrast (mean input within 4 cells of the COM over the frame's mean |input|); 1-5 hops and >= 2
+# dwells at least 6 cells apart, with >= 3 cells of edge clearance once rotated; and a traced neuron
+# with >= 3 excursions past 2.5 nA (runs above 1.5 nA merged across 5 ms gaps), none over 25 ms and
+# the final one under 15 ms. This one: bump contrast 7.4 with 1.22 nA mean input inside the patch
+# against 0.07 outside, 3 hops at 7.5x the median block step, and 4 excursions of at most 14 ms.
+# Computed here rather than inside the panel because the patch, the traced neuron and the trace
+# window are all defined from it. Re-check after regenerating `demo_run.jld2`.
+const FIELD_TINDEX = 44_280
 const FIELD_WINDOW = 1170
 const FIELD_STRIDE = 3
-const FIELD_FRAME, TRAJECTORY = let
+const CELL = DX / N_GRID
+# Neuron j = a + (b - 1)N sits at `epositions[j]` = ((a, b) .- 0.5) .* CELL, so the FIRST grid index is
+# x. `track_com` and the heatmap read the second as x, so the window is permuted to (t, y, x); without
+# it the field was drawn mirrored in the diagonal and the patch landed off the bump.
+# The field is a torus, so (d) is rotated by whole cells (`FIELD_SHIFT`) to centre the track clear
+# of the seam.
+const FIELD_FRAME, TRAJECTORY, FIELD_SHIFT = let
     grid = reshape(parent(ustripall(INPUT)), (size(INPUT, 1), N_GRID, N_GRID))
-    win = grid[(FIELD_TINDEX - FIELD_WINDOW):FIELD_TINDEX, :, :]
-    cx, cy = track_com(win)
+    win = permutedims(grid[(FIELD_TINDEX - FIELD_WINDOW):FIELD_TINDEX, :, :], (1, 3, 2))
+    cx, cy = track_com(win)                          # cell units, cell i at i
+    unwrap(c) = c[1] .+ [0; cumsum(mod.(diff(c) .+ N_GRID / 2, N_GRID) .- N_GRID / 2)]
+    ux, uy = unwrap(cx), unwrap(cy)
+    centre(u) = round(Int, (N_GRID + 1) / 2 - (maximum(u) + minimum(u)) / 2)
+    shift = (centre(ux), centre(uy))
+    tomm(u, s) = mod.(CELL .* (u .+ s .- 0.5), DX)
     (
-        win[end, :, :],
+        circshift(win[end, :, :], (shift[2], shift[1])),   # (y, x)
         (;
-            xs = DX .* cx[1:FIELD_STRIDE:end] ./ N_GRID,
-            ys = DX .* cy[1:FIELD_STRIDE:end] ./ N_GRID,
+            xs = tomm(ux, shift[1])[1:FIELD_STRIDE:end],
+            ys = tomm(uy, shift[2])[1:FIELD_STRIDE:end],
             # Sample offsets are converted with the real sampling period; dividing the sample count
             # by 1000 (as plot_demo_run.jl does) overstates the elapsed time tenfold at dt = 0.1 ms.
             t = collect(0:FIELD_WINDOW)[1:FIELD_STRIDE:end] .* DT_MS .* MS_TO_S,
         ),
+        shift,
     )
 end
+"`pos` (mm) in the rotated frame that (d) draws."
+rotate(pos) = mod.(pos .+ FIELD_SHIFT .* CELL, DX)
 
 # The patch is centred where the trajectory ENDS, so (d)'s circle marks where the activity arrives
 # and (e)'s raster is the population there. The traced neuron is then just the cell nearest that
 # centre; it does not have to sit exactly on it.
 const PATCH_RADIUS = 0.1
-const PATCH_ORIGIN = [TRAJECTORY.xs[end], TRAJECTORY.ys[end]]
+const PATCH_ORIGIN = mod.([TRAJECTORY.xs[end], TRAJECTORY.ys[end]] .- FIELD_SHIFT .* CELL, DX) # unrotated
 "Distance from `pos` to the patch centre, respecting the periodic (torus) boundary."
 patchdistance(pos) = (dp = abs.(pos .- PATCH_ORIGIN); norm(min.(dp, DX .- dp)))
 const PATCH_DISTANCES = patchdistance.(craw["epositions"])
@@ -337,13 +349,11 @@ function increment_panel!(ax, d; showsurrogate = true, xlim = 7)
 end
 
 "Input field snapshot with the centre-of-mass trajectory over the preceding window (Fig 1e)."
-# `tindex` ends a window chosen by searching the whole saved trace for the stretch that never crosses
-# the periodic boundary while still travelling far (path length 598 grid units, zero seam crossings).
-# With no crossings the cosmetic re-centring `shift` is unnecessary, so it is off.
+# Drawn rotated by `FIELD_SHIFT`, so the track does not cross the periodic boundary.
 function circuit_field_panel!(gl)
     frame = FIELD_FRAME
     xs, ys, colour = TRAJECTORY.xs, TRAJECTORY.ys, TRAJECTORY.t
-    xx = range(0, DX, length = N_GRID)
+    xx = range(CELL / 2, DX - CELL / 2, length = N_GRID)   # cell centres, as `epositions`
     # Insurance for any window that does wrap: blank the wrapping point so the line breaks there
     # rather than being drawn straight across the field.
     wrapped = [false; (abs.(diff(xs)) .> DX / 2) .| (abs.(diff(ys)) .> DX / 2)]
@@ -358,21 +368,20 @@ function circuit_field_panel!(gl)
     )
     # Clipped at 0 rather than autoscaled: the negative tail spent a third of the colour range on
     # values the panel is not about, washing out the positive pops.
-    h = heatmap!(
-        ax, xx, xx, frame'; colormap = seethrough(reverse(sunrise)),
-        colorrange = (0, maximum(frame)), rasterize = 10
+    h = heatmap!( # transparent at zero input, black at the maximum
+        ax, xx, xx, frame'; colormap = seethrough(RGBf(0, 0, 0)), colorrange = (0, maximum(frame)), rasterize = 10
     )
     lines!(ax, xs, ys; color = :white, linewidth = 2.5)
-    p = lines!(ax, xs, ys; color = colour, colormap = reverse(cgrad(:turbo)), linewidth = 1.5)
+    p = lines!(ax, xs, ys; color = colour, colormap = sunrise, linewidth = 1.5)
     θ = range(0, 2π, length = 200)                 # the patch rastered in (e)
+    po = rotate(PATCH_ORIGIN)
     lines!(
-        ax, PATCH_ORIGIN[1] .+ PATCH_RADIUS .* cos.(θ),
-        PATCH_ORIGIN[2] .+ PATCH_RADIUS .* sin.(θ);
+        ax, po[1] .+ PATCH_RADIUS .* cos.(θ), po[2] .+ PATCH_RADIUS .* sin.(θ);
         color = chernoe, linestyle = :dash, linewidth = 1.5
     )
+    tn = rotate(craw["epositions"][TRACED_NEURON])
     scatter!(                                       # the neuron traced in (e)
-        ax, [craw["epositions"][TRACED_NEURON][1]], [craw["epositions"][TRACED_NEURON][2]];
-        color = chernoe, markersize = 7, strokecolor = :white, strokewidth = 1
+        ax, [tn[1]], [tn[2]]; color = chernoe, markersize = 7, strokecolor = :white, strokewidth = 1
     )
     Colorbar(gl[1, 2], h; label = unitlabel("Input", "nA"), width = 8) # fills the field's height
     cbt = Colorbar(
@@ -461,7 +470,7 @@ function circuit_trace_panels!(gl; ts = (FIELD_TINDEX - 5000):FIELD_TINDEX, stri
     axi = Axis(
         gtr[3, 1]; ylabel = unitlabel(mit("I"), "nA"), xlabel = unitlabel("Time", "s"),
         yticklabelspace = YSPACE,
-        yticks = WilkinsonTicks(3; k_max = 3), limits = (xlim, (-1, 3))
+        yticks = WilkinsonTicks(3; k_max = 3), limits = (xlim, (-1, nothing)) # the arriving bump drives it past 5 nA
     )
     lines!(axi, tsec, collect(ustripall(INPUT[ts, neuron])); linewidth = 1.2, color = experiment_color)
 
@@ -536,11 +545,11 @@ function combined_curves_panels!(gl)
         color = circuit_color, linestyle = :dash
     )
     text!(
-        axm, LABEL_X, 0.96; text = rich(mit("a"), " = $(round(only(betas(mfit_exp)), sigdigits = 2))"),
+        axm, LABEL_X, 0.96; text = rich(mit("a"), @sprintf(" = %.2f", only(betas(mfit_exp)))),
         space = :relative, color = experiment_color, align = (:left, :top)
     )
     text!(
-        axm, LABEL_X, 0.96 - LABEL_GAP; text = rich(mit("a"), " = $(round(only(betas(mfit_circ)), sigdigits = 2))"),
+        axm, LABEL_X, 0.96 - LABEL_GAP; text = rich(mit("a"), @sprintf(" = %.2f", only(betas(mfit_circ)))),
         space = :relative, color = circuit_color, align = (:left, :top)
     )
     axislegend(axm; position = :rb, framevisible = false)
@@ -592,11 +601,11 @@ function combined_curves_panels!(gl)
         color = circuit_color, linestyle = :dash
     )
     text!(
-        axp, LABEL_X, 0.43; text = rich(mit("b"), " = $(round(psd.spectral_exponent_median; sigdigits = 3))"),
+        axp, LABEL_X, 0.43; text = rich(mit("b"), @sprintf(" = %.2f", psd.spectral_exponent_median)),
         space = :relative, color = experiment_color, align = (:left, :top)
     )
     text!(
-        axp, LABEL_X, 0.43 - LABEL_GAP; text = rich(mit("b"), " = $(round(circuit.psd.exponent; sigdigits = 3))"),
+        axp, LABEL_X, 0.43 - LABEL_GAP; text = rich(mit("b"), @sprintf(" = %.2f", circuit.psd.exponent)),
         space = :relative, color = circuit_color, align = (:left, :top)
     )
 
@@ -629,11 +638,11 @@ function combined_curves_panels!(gl)
         color = circuit_color, linestyle = :dash
     )
     text!(
-        axf, 0.001 .* 40, 10^0.32; text = rich(mit("c"), " = $(round(ffit_exp.β, digits = 2))"),
+        axf, 0.001 .* 25, 10^0.32; text = rich(mit("c"), @sprintf(" = %.2f", ffit_exp.β)),
         color = experiment_color, align = (:left, :center)
     )
     text!(
-        axf, 0.001 .* 1.2, 1.4; text = rich(mit("c"), " = $(round(circuit.fano.exponent, digits = 2))"),
+        axf, 0.001 .* 1.2, 1.4; text = rich(mit("c"), @sprintf(" = %.2f", circuit.fano.exponent)),
         color = circuit_color, align = (:left, :center)
     )
     return (;
@@ -859,6 +868,25 @@ begin # * Statistics --- the same files plot_demo_run.jl and combined_curves.jl 
         println(io, "FT surrogate excess kurtosis (median across sessions): $(haskey(incr, "kurtosis_surrogate_session") ? median(incr["kurtosis_surrogate_session"]) : median(incr["kurtosis_surrogate"]))")
         println(io, "FT surrogate excess kurtosis (flat median over channels): $(median(incr["kurtosis_surrogate"]))")
         println(io, "channels: $(incr["nchannels"]), sessions: $(length(incr["sessions"]))")
+    end
+
+    # Circuit `a` with each target's incident spike trains circularly shifted (synchrony removed) or
+    # redrawn uniformly (Poisson), replayed on an isolated copy of the neuron; mean ± SD over seeds.
+    open(joinpath(outdir, "synchrony_statistics.txt"), "w") do io
+        c(k) = findfirst(==(k), sync["conditions"])
+        ms(x) = @sprintf("%.3f ± %.3f", mean(x), std(x))
+        ac, a = sync["a_curve"], sync["a"] # seed × condition; neuron × condition × seed
+        Δ = a[:, c("circular"), :] .- a[:, c("recorded"), :]
+        println(io, "$(length(sync["seeds"])) seeds, $(size(a, 1)) E neurons each, $(sync["tmax_s"]) s runs")
+        println(io, "a, fit to the neuron-median MAD curve (as drawn):")
+        for k in ("recorded", "circular", "uniform")
+            println(io, "  $k: $(ms(ac[:, c(k)]))")
+        end
+        println(io, "Δa circular − recorded: $(ms(ac[:, c("circular")] .- ac[:, c("recorded")]))")
+        println(io, "Δa uniform − recorded: $(ms(ac[:, c("uniform")] .- ac[:, c("recorded")]))")
+        println(io, "per-neuron Δa circular − recorded (per-seed median): $(ms([median(filter(isfinite, x)) for x in eachcol(Δ)]))")
+        println(io, "neurons with lower a without synchrony: $(count(<(0), Δ)) / $(count(isfinite, Δ))")
+        println(io, "real replay spikes reproduced (worst seed): $(minimum(sync["spikes_reproduced"]))")
     end
     @info "Saved statistics to $outdir"
 end

@@ -7,6 +7,7 @@ WorkingRegime.jl reproduces the analyses and figures of the working-regime study
 
 The scripts need Julia 1.13, which they call as `julia +1.13` through [juliaup](https://github.com/JuliaLang/juliaup). From the repository root:
 ```bash
+juliaup add 1.13   # installs the 1.13 channel that `julia +1.13` selects
 julia +1.13 --project -e 'using Pkg; Pkg.instantiate()'
 ```
 `Pkg.instantiate()` resolves and installs the root project and all three workspace members, which share one `Manifest.toml`.
@@ -45,6 +46,7 @@ Since steps 6 and 7 carry their own session list, they do not need step 1.
 | 2 | `plot_demo_run.jl` | `circuit_curves.jld2` | Fig 1 |
 | 3 | `circuit_sweep.jl` (*GPU*, *cluster*; several days) | `circuit_sweep/` | step 4 |
 | 4 | `circuit_exponents.jl` (*cluster*) | `circuit_exponents.jld2` | Fig 4 |
+| 5 | `synchrony_surrogates.jl` (*GPU*) | `synchrony_surrogates/`, `synchrony_surrogates.jld2` | Fig 1 |
 
 ## Theory ([`WRTheory/scripts/`](WRTheory/scripts/))
 

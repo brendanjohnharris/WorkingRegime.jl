@@ -311,7 +311,7 @@ const c_exponents = jldopen(f -> f["exponents"], variability_path, "r")
 "One region's variability exponents across sessions at `layer_idx`; empty if the layer is absent."
 function region_c(structure, layer_idx)
     haskey(c_exponents, layer_idx) || return Float64[]
-    return c_exponents[layer_idx][:, findfirst(==(structure), structures)]
+    return filter(isfinite, c_exponents[layer_idx][:, findfirst(==(structure), structures)]) # sessions lacking this area are NaN
 end
 
 # Categorical colour per region, ordered low → high hierarchy (`structures` is

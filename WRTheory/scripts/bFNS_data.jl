@@ -167,7 +167,7 @@ begin # * Sample time series: effect of α, β, γ
     # Four configurations, each progressively changing one parameter
     configs = [
         (
-            label = "Standard diffusion\n(α=2, β=1, γ=0)",
+            label = "Normal diffusion\n(α=2, β=1, γ=0)",
             α = 2.0, β = 1.0, γ = 0.0,
         ),
         (

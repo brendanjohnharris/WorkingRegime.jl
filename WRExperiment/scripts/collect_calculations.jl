@@ -590,7 +590,7 @@ begin
         unitdepths = fano_data[stim_str]["unitdepths"][findfirst(structures .== structure)]
         unitdepths = map(unitdepths) do units
             filter(units) do unit
-                unit.layer == 2
+                unit.layer == 2 && goodunit(unit)
             end
         end
         unitdepths = filter(!isempty, unitdepths)

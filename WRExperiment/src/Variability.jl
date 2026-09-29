@@ -6,8 +6,9 @@
 # moved. Each package keeping the part it needs costs a copy and buys independence; the copies are
 # small, and the risk they guard against (a path that silently stops resolving) has already fired.
 #
-# Keep this in step with the other copies if the estimator itself changes. Only `β` is read by this
-# package's pipelines, via `collect_calculations_visual_coding.jl`.
+# This copy differs from WRCircuit's and WRTheory's by design (2026-09-24): the experimental data use
+# the flat-rise fit below, the circuit and theory the floor-bic steepest-segment fit. Only `β` is read
+# by this package's pipelines.
 #
 # Requires TimeseriesTools' OptimExt for MAPPLE's `fit!`, which WRExperiment activates by importing
 # both Optim and ForwardDiff.
@@ -37,6 +38,21 @@ too wide and the crossover eats the scaling band.
 const VARIABILITY_WIDTH = 0.1
 
 """
+    goodunit(u) -> Bool
+
+Unit-quality filter for the Fano-factor analyses, applied to a unit-table row `u`: sorted as `"good"`
+(not a noise cluster), present for more than 90% of the recording (`presence_ratio > 0.9`) and with
+`isi_violations < 0.5`. There is no amplitude cutoff: with it (the full Allen filter) too few L2/3
+units survive to leave most (session, area) cells their 5-unit minimum. A metric absent from a
+cohort's unit table is not applied. Low-quality units flatten the Fano curve at long windows, so
+the filter raises `c` (L2/3 flat-rise medians ~0.14-0.19 unfiltered, ~0.19-0.25 filtered).
+"""
+function goodunit(u)
+    q(k, default) = hasproperty(u, k) ? coalesce(getproperty(u, k), default) : default
+    return q(:quality, "good") == "good" && q(:presence_ratio, 1.0) > 0.9 && q(:isi_violations, 0.0) < 0.5
+end
+
+"""
 What [`variability_exponent`](@ref) returns when no candidate fits, so a caller that skips a curve
 can supply the same shape rather than build its own sentinel and drift from this one.
 """
@@ -48,29 +64,20 @@ const VARIABILITY_NOFIT = (;
     variability_exponent(ff; kwargs...) -> (; β, lo, hi, ncomponents, βs, censored)
     variability_exponent(t, vals; kwargs...)
 
-Unified variability exponent of a Fano-factor curve `ff` (or lags `t` and values `vals`): `β`, the
-log--log slope of the scaling segment, over the fitted band `lo .. hi` in the curve's own time units.
+Variability exponent of a Fano-factor curve `ff` (or lags `t` and values `vals`): `β`, the log--log
+slope of a single rise from the shot-noise floor to the end of the window, over `lo .. hi` in the
+curve's own time units.
 
-The model is a MAPPLE fit whose first component is pinned flat ([`VARIABILITY_PINS`](@ref)) and whose
-remaining segments are free, with the component count chosen by BIC. Two components give a floor and
-a rise that runs to the end of the window; three add a free segment above the scaling band, which is
-how a saturating curve is expressed. Only the floor is imposed, so a curve that saturates and one
-that does not are both fit by the same estimator rather than by two --- pinning the outer segment
-flat instead forces a plateau onto a curve that has none, and on the experimental median it drove the
-upper knot onto the last sample, where the quoted band was the recording length rather than a
-measurement.
+The model is a two-component MAPPLE fit, a floor pinned flat ([`VARIABILITY_PINS`](@ref)) and one free
+rise; `lo` is the fitted knee and `hi` the end of the window, so `censored` is always `true`. Where a
+curve rises in two stages (the experimental median: +0.10 over 13-60 ms, then +0.21 above), `β` is the
+overall slope of both rather than either stage. That is deliberate: a read-out that picks one segment
+(the steepest, or the first) reads different timescales in different areas, since which stage is
+steeper varies by area, and so is not comparable across the hierarchy (in L2/3 the floor-bic fit read
+its top segment in 2% of VISp cells against 28-43% elsewhere).
 
-`β` is the STEEPEST rising segment, and `lo .. hi` is that segment's own span. One rule serves both
-shapes: where a plateau sits above the rise the steepest segment IS the rise, and where the curve
-instead rises in two stages (the experimental median: +0.10 over 13-60 ms, then +0.21 above, at every
-knee width tried including a free one) it is the asymptotic stage rather than the floor crossover.
-`censored` marks that the reported segment is the topmost, so its `hi` is where the fitted window
-ends rather than a measured crossover --- the scaling continues to at least there.
-
-Fit AGGREGATED curves only: per-unit and per-repeat curves have no SNR for a free-knot fit (per-neuron
-circuit read-outs median 0.78 against 0.28 for the neuron-median curve), so take medians of curves
-first and medians of exponents across sessions after. Extra `kwargs` (e.g. `time_limit`) go to each
-candidate's refinement.
+Fit aggregated curves (medians across units, then medians of exponents across sessions). Extra
+`kwargs` (e.g. `time_limit`) go to the refinement.
 """
 function variability_exponent(ff; kwargs...)
     m, y = variability_model(ff; kwargs...)
@@ -79,16 +86,11 @@ end
 
 variability_exponent(::Nothing, y) = VARIABILITY_NOFIT
 
-"Read the exponent and band off an already-selected model, so a diagnostic holding one need not refit."
+"Read the exponent and band off an already-fitted model, so a diagnostic holding one need not refit."
 function variability_exponent(m::MAPPLE, y)
     βs, bps = betas(m), exp10.(breakpoints(m))
-    i = argmax(view(βs, 2:length(βs))) + 1 # steepest rising segment; the floor is pinned flat
-    # TimeseriesTools holds the outermost knot at the top of the fitted band, so for the topmost
-    # segment `hi` is where the window ends rather than a measured crossover: flag it `censored`.
-    return (;
-        β = βs[i], lo = bps[i - 1], hi = bps[i],
-        ncomponents = length(βs), βs, censored = i == length(βs)
-    )
+    # The outermost knot is held at the top of the fitted band, so `hi` is where the window ends.
+    return (; β = βs[2], lo = bps[1], hi = bps[2], ncomponents = length(βs), βs, censored = true)
 end
 
 variability_exponent(t, vals; kwargs...) = variability_exponent(Timeseries(vals, t); kwargs...)
@@ -96,13 +98,12 @@ variability_exponent(t, vals; kwargs...) = variability_exponent(Timeseries(vals,
 """
     variability_model(ff; kwargs...) -> (model, curve) | (nothing, curve)
 
-The selected MAPPLE model behind [`variability_exponent`](@ref), with the NaN-stripped curve it was
+The flat-rise MAPPLE model behind [`variability_exponent`](@ref), with the NaN-stripped curve it was
 fit to. Separate so a diagnostic can score the fitted curve against the data without refitting it
 under slightly different settings, which is how earlier copies of this estimator drifted apart.
 """
 function variability_model(
-        ff; seed = VARIABILITY_SEED, max_components = 3, multistart = 4,
-        width = VARIABILITY_WIDTH, refine...
+        ff; seed = VARIABILITY_SEED, multistart = 4, width = VARIABILITY_WIDTH, refine...
     )
     k = findall(!isnan, parent(ff)) # scattered all-unit-NaN lags survive a median; NaN grinds Optim
     y = Timeseries(collect(parent(ff))[k], collect(lookup(ff, 1))[k])
@@ -111,12 +112,11 @@ function variability_model(
         [VARIABILITY_PINS; "transition_width" => width]
     Random.seed!(seed) # `_perturb` draws multistart restarts from the global RNG
     m = try
-        fit(
-            MAPPLE, y; peaks = 0, components = :auto, max_components,
-            refine = (; fix = pins, multistart, refine...)
-        )
+        mm = fit(MAPPLE, y; peaks = 0, components = 2)
+        fit!(mm, y; fix = pins, multistart, refine...)
+        mm
     catch
-        nothing # a curve no candidate will fit is dropped, not fatal to a sweep over many
+        nothing # a curve that will not fit is dropped, not fatal to a sweep over many
     end
     return (m, y)
 end

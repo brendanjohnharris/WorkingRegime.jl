@@ -37,7 +37,7 @@ export structures, layers, PTHR, hierarchy_scores, bootstrapmedian, val_to_strin
     parselayernum, commondepths, channellayers,
     madev_taus, surrogate_null, lfp_surrogate_stats, send_surrogates,
     variability_exponent, variability_model, VARIABILITY_SEED, VARIABILITY_PINS,
-    VARIABILITY_WIDTH, VARIABILITY_NOFIT,
+    VARIABILITY_WIDTH, VARIABILITY_NOFIT, goodunit,
     unitids, VISUAL_CODING_FC, VISUAL_CODING_BO, VISUAL_CODING_STIMULUS, visual_coding_sessions,
     visual_coding_calcdir
 

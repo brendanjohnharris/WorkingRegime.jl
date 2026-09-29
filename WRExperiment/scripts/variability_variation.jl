@@ -6,7 +6,7 @@ exec julia +1.13 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 # Variability exponent against the cortical hierarchy --- a CALCULATION, not a figure.
 #
 # Derives the third exponent for Figure 4: the VARIABILITY exponent, the scaling slope of each
-# session's unit-median Fano-factor curve (the BIC-selected MAPPLE fit, `variability_exponent` from
+# session's unit-median Fano-factor curve (the flat-rise MAPPLE fit, `variability_exponent` from
 # this package). The result is cached under `rootdatadir(NAME)` and read by
 # `scripts/Fig4_hierarchical_variation.jl`; the standalone figure this script used to draw is gone.
 #
@@ -16,11 +16,10 @@ exec julia +1.13 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 #
 # The exponent is RE-DERIVED here from the unit Fano curves rather than read from the stored
 # `fano_slopes` (which are per-unit OLS slopes over a fixed 31.6-1000 ms band, session-meaned with a
-# NaN-poisoning bug): each (session, layer) cell's exponent is the unified BIC-selected MAPPLE fit
-# to that cell's unit-MEDIAN curve, and Figure 4 medians across sessions. Aggregating curves before
-# fitting is essential --- per-unit curves lack the SNR for any free-knot fit --- and the fitted
-# knots measure the scaling band instead of assuming it, which is what lets the same estimator serve
-# the circuit (whose regime sits at 10-100 ms, outside the old fixed band) and the mean-field sweep.
+# NaN-poisoning bug): each (session, layer) cell's exponent is the flat-rise MAPPLE fit (a pinned
+# floor and one rise to the end of the window) to that cell's unit-MEDIAN curve, and Figure 4 medians
+# across sessions. The fitted knee measures where the rise starts instead of assuming a band. The
+# circuit and mean-field sweep keep the floor-bic steepest-segment fit in their own packages.
 # It lives in WRExperiment (rather than being shared through a script `include`) so that the
 # estimator comes from the package it belongs to; see WRExperiment/src/Variability.jl.
 #
@@ -31,7 +30,7 @@ exec julia +1.13 -t auto --color=yes "${BASH_SOURCE[0]}" "$@"
 
 using DrWatson
 @quickactivate "WRExperiment"
-import WRExperiment: variability_exponent, rootdatadir, VARIABILITY_NOFIT  # named import: the script defines its own `structures` etc.
+import WRExperiment: variability_exponent, rootdatadir, VARIABILITY_NOFIT, goodunit  # named import: the script defines its own `structures` etc.
 using JLD2
 using DataFrames
 using TimeseriesTools
@@ -56,6 +55,7 @@ const SCATTER_LAYER = 2
 
 const CURVE_WINDOW = 1.0 .. 1.0e3      # timescales drawn in the curve panel
 const MIN_UNITS = 5                    # fewest unit curves for a (session, layer) median to be fit
+const MIN_AREAS = 4                    # fewest areas a session needs at a layer; matches Figure 4's sessionkendall
 
 const PTHR = 1.0e-2      # matches WRExperiment.PTHR; p-values below are BH-adjusted across layers
 const NBOOT = 10_000
@@ -76,14 +76,14 @@ session_exponent(t, fano) = variability_exponent(t, fano; time_limit = 20.0)
 """
     session_curve(df, layer) -> (t, fano) | nothing
 
-Median Fano-factor curve across one session's units at `layer`. A unit with no curve is stored as
-a scalar `NaN` rather than a vector, so those are dropped by type before the median (the same
-guard collect_calculations.jl uses for its VISp curve); sessions with fewer than [`MIN_UNITS`](@ref)
-curves are dropped rather than fit through a barely-averaged median.
+Median Fano-factor curve across one session's units at `layer` that pass `goodunit`. A unit with no
+curve is stored as a scalar `NaN` rather than a vector, so those are dropped by type before the
+median (the same guard collect_calculations.jl uses for its VISp curve); sessions with fewer than
+[`MIN_UNITS`](@ref) curves are dropped rather than fit through a barely-averaged median.
 """
 function session_curve(df, layer)
     u = subset(df, :layer => ByRow(==(layer)))
-    curves = [c for c in u.fano_factor if c isa AbstractVector]
+    curves = [r.fano_factor for r in eachrow(u) if r.fano_factor isa AbstractVector && goodunit(r)]
     length(curves) < MIN_UNITS && return nothing
     n = length(first(curves))
     all(c -> length(c) == n, curves) || return nothing   # off-grid session; drop rather than misalign
@@ -128,15 +128,17 @@ function derive_exponents(_)
             curve = session_curve(df, SCATTER_LAYER))
     end
 
-    # Per layer: keep the sessions every structure recorded, then lay them out (session × structure).
+    # Per layer: keep sessions with at least MIN_AREAS fitted structures, laid out (session × structure)
+    # with NaN for an absent area; Figure 4's sessionkendall correlates each session over its own areas.
     bysl = Dict((r.structure, r.session) => r.vals for r in rows)
+    val(s, sid, k) = haskey(bysl, (s, sid)) ? bysl[(s, sid)][k] : NaN
     exponents, sessions = Dict{Int, Matrix{Float64}}(), Dict{Int, Vector{Int}}()
     for (k, l) in enumerate(layer_codes)
-        have = [Set(r.session for r in rows if r.structure == s && isfinite(r.vals[k])) for s in structures]
-        common = sort(collect(intersect(have...)))
-        exponents[l] = [bysl[(s, sid)][k] for sid in common, s in structures]
-        sessions[l] = common
-        @info "Layer $(layer_names[l]): $(length(common)) sessions × $(length(structures)) structures"
+        sids = sort(unique(r.session for r in rows))
+        kept = [sid for sid in sids if count(s -> isfinite(val(s, sid, k)), structures) >= MIN_AREAS]
+        exponents[l] = [val(s, sid, k) for sid in kept, s in structures]
+        sessions[l] = kept
+        @info "Layer $(layer_names[l]): $(length(kept)) sessions with >= $MIN_AREAS of $(length(structures)) structures"
     end
 
     # Median Fano curve per region: median across each session's units (done in `session_curve`), then
@@ -170,7 +172,7 @@ end
 # DrWatson cannot vary the cache by config, and a changed estimator would otherwise be served
 # silently from the old file. The estimator is therefore recorded IN the result and checked on load.
 # Files predating that key carry no estimator and are accepted: they came from this same fit.
-const ESTIMATOR = "floor-bic"
+const ESTIMATOR = "flat-rise; goodunit; >= 4 areas"   # all three change the result, so all three key the cache
 data, datapath = produce_or_load(
     derive_exponents, Dict("stim" => stim, "estimator" => ESTIMATOR), rootdatadir(NAME);
     filename = "variability_exponents", tag = true
@@ -221,7 +223,8 @@ preserves each session's spread and destroys only the hierarchy ordering.
 function hierarchy_tau(Y; N = NBOOT)
     nsesh, nstruct = size(Y)
     X = repeat(permutedims([hierarchy_scores[s] for s in structures]), nsesh, 1)
-    x, y = vec(X), vec(Y)
+    ok = isfinite.(vec(Y))      # absent areas are NaN; `kendall` would count NaN pairs as discordant
+    x, y = vec(X)[ok], vec(Y)[ok]
     τ = kendall(x, y)
 
     rng = Random.MersenneTwister(SEED)
@@ -232,9 +235,11 @@ function hierarchy_tau(Y; N = NBOOT)
     end
     lo, hi = quantile(filter(!isnan, boot), (0.025, 0.975))
 
+    xall = vec(X)
     surrogate = map(1:N) do _
-        Ys = reduce(vcat, permutedims(Y[i, randperm(rng, nstruct)]) for i in 1:nsesh)
-        kendall(x, vec(Ys))
+        ys = vec(reduce(vcat, permutedims(Y[i, randperm(rng, nstruct)]) for i in 1:nsesh))
+        k = isfinite.(ys)
+        kendall(xall[k], ys[k])
     end
     p = mean(abs(τ) .< abs.(filter(!isnan, surrogate)))
     return τ, (lo, hi), p

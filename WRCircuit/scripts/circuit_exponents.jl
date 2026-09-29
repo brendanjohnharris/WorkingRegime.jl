@@ -198,7 +198,8 @@ try
         end
         # Refresh only the axis lookups / anchors tied to the planes just computed (each plane owns its axes).
         if want(:dg) || want(:ds) || want(:gs)
-            merged["delta"] = udelta; merged["Delta_g_K"] = ugk; merged["sigma_ee"] = usigma; merged["seed"] = useed
+            merged["delta"] = udelta; merged["Delta_g_K"] = ugk; merged["seed"] = useed
+            isempty(usigma) || (merged["sigma_ee"] = usigma) # no σ_ee files (a δ/Δg_K-only copy of the sweep): keep the stored axis
             merged["delta_0"] = delta_0; merged["Delta_g_K_0"] = Delta_g_K_0; merged["sigma_ee_0"] = sigma_ee_0
         end
         if want(:td)
