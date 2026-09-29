@@ -199,10 +199,13 @@ begin # * Panel 4 — Unconfined power spectra: β = 1.0 vs β = 0.5
         gs[gi_spectrum]; xlabel = "Frequency", ylabel = "Power",
         title = "Unconfined spectrum", yticks = LogTicks(WilkinsonTicks(nyticks))
     )
-    plotspectrum!(ax, s_hi; label = rich(mit("β"), " = $(β_hi)"), color = :cornflowerblue)
-    plotspectrum!(ax, s_lo; label = rich(mit("β"), " = $(β_lo)"), color = :crimson)
+    plotspectrum!(ax, s_hi; color = :cornflowerblue)
+    plotspectrum!(ax, s_lo; color = :crimson)
     ax.limits = ((1.0e-1, 1.0e0), (nothing, nothing))
-    axislegend(ax; position = :lb)
+    axislegend( # explicit lines: the `plotspectrum!` recipe's own entry is a marker + line
+        ax, [LineElement(color = :cornflowerblue), LineElement(color = :crimson)],
+        [rich(mit("β"), " = $(β_hi)"), rich(mit("β"), " = $(β_lo)")]; position = :lb
+    )
 end
 
 begin # * Right column — sample time series: effect of α, β, γ
