@@ -1,6 +1,7 @@
 # WorkingRegime.jl
+[![Figshare](https://img.shields.io/badge/figshare-556472?logo=figshare&logoColor=fff&style=for-the-badge)](https://doi.org/10.6084/m9.figshare.34021314)
 
-WorkingRegime.jl reproduces the analyses and figures of the working-regime study. We measure three scaling exponents of cortical dynamics in neural recordings and compute the same exponents for a spiking circuit model and a fractional neural sampling theory:
+WorkingRegime.jl reproduces the analyses and figures of "_An adaptive fractional state links circuit mechanisms to cortical dynamics across the visual hierarchy_". We measure three scaling exponents of cortical dynamics in neural recordings, a spiking circuit model, and a fractional neural sampling theory:
 - the diffusion exponent `a`, from the mean absolute deviation of increments;
 - the spectral exponent `b`, the aperiodic slope of the power spectrum;
 - the variability exponent `c`, from the scaling of spike-count Fano factors.
@@ -9,9 +10,9 @@ The repository is a Julia workspace of three modules and a root package:
 - [`WRExperiment/`](WRExperiment/) measures the exponents in local field potentials and single units from mouse visual cortex, using the Allen Visual Behavior Neuropixels dataset with the Visual Coding functional-connectivity cohort for replication. The module's scripts read the data through [AllenNeuropixelsBase.jl](https://github.com/brendanjohnharris/AllenNeuropixelsBase.jl), fit exponents with [TimeseriesTools.jl](https://github.com/brendanjohnharris/TimeseriesTools.jl) and build surrogate nulls with [TimeseriesSurrogates.jl](https://github.com/JuliaDynamics/TimeseriesSurrogates.jl).
 - [`WRCircuit/`](WRCircuit/) simulates a spatial spiking circuit on GPU with [Dewdrop.jl](https://github.com/brendanjohnharris/Dewdrop.jl) and sweeps its parameters.
 - [`WRTheory/`](WRTheory/) simulates fractional neural samplers with [FractionalNeuralSampling.jl](https://github.com/brendanjohnharris/FractionalNeuralSampling.jl).
-- The root package draws the figures. The scripts in [`scripts/`](scripts/) use CairoMakie with [Fathom.jl](https://github.com/brendanjohnharris/Fathom.jl) and share helpers from [`src/WorkingRegime.jl`](src/WorkingRegime.jl).
+- The root package reproduces all figures in the paper. The scripts in [`scripts/`](scripts/) use CairoMakie with [Fathom.jl](https://github.com/brendanjohnharris/Fathom.jl) and share helpers from [`src/WorkingRegime.jl`](src/WorkingRegime.jl).
 
-To reproduce the figures, run each module's calculation scripts in the order given under [Producing the data](#producing-the-data), then run `bash make_plots`.
+To reproduce the figures, run each module's calculation scripts in the order given under [Producing the data](#producing-the-data), then run `bash make_plots`. To skip the calculations, download the figure inputs from [figshare](https://doi.org/10.6084/m9.figshare.34021314) instead (see [Producing the figures](#producing-the-figures)).
 
 # Setup
 
@@ -22,17 +23,17 @@ julia +1.13 --project -e 'using Pkg; Pkg.instantiate()'
 ```
 `Pkg.instantiate()` resolves and installs the root project and all three workspace members, which share one `Manifest.toml`.
 
-The experiment scripts read the Allen data through [AllenNeuropixelsBase.jl](https://github.com/brendanjohnharris/AllenNeuropixelsBase.jl). Set the Allen data cache with the `datadir` preference in a root `LocalPreferences.toml`:
+The experiment scripts read Allen Neuropixels data through [AllenNeuropixelsBase.jl](https://github.com/brendanjohnharris/AllenNeuropixelsBase.jl). Set the Allen data cache with the `datadir` preference in a root `LocalPreferences.toml`:
 ```toml
 [AllenNeuropixelsBase]
 datadir = "/path/to/allen/cache"
 ```
 
-Every script has a `bash` header and activates its own project, so it runs from any directory as `bash path/to/script.jl`. Hand-made figure inputs (the brain illustration, the visual-cortex map and the mean-field schematic) are in [`assets/`](assets/).
+Every script has a `bash` header and activates its own project, and can be run from any directory as `bash path/to/script.jl`. Hand-made figure inputs (the brain illustration, the visual-cortex map and the mean-field schematic) are in [`assets/`](assets/).
 
 # Producing the data
 
-The three groups below are independent, but the steps within each group must be run in order. Figure inputs, the files whose *Used by* entry names a figure, are written to `data/<Module>/` at the repository root. Intermediates stay in each module's own `data/` directory. Steps marked *cluster* use cluster jobs or workers on the USyd Physics cluster (or NCI Gadi, for the circuit sweep) and local workers elsewhere. Steps marked *GPU* need a CUDA device.
+The three groups below are independent, but the steps within each group must be run in order. Figure inputs, the files whose *Used by* entry names a figure, are written to `data/<Module>/` at the repository root. Intermediate files stay in each module's own `data/` directory. Steps marked *cluster* use cluster jobs or workers on the USyd Physics cluster (or NCI Gadi, for the circuit sweep) and local workers elsewhere. Steps marked *GPU* need a CUDA device.
 
 ## Experiment ([`WRExperiment/scripts/`](WRExperiment/scripts/))
 
@@ -69,7 +70,7 @@ Steps 6 and 7 carry their own session list and do not need step 1.
 
 # Producing the figures
 
-The figure inputs are deposited on FigShare as one archive per module. Unpacking the archives into `data/` replaces the calculation steps above. With the data in place, draw the figures with:
+The figure inputs are deposited on [figshare](https://doi.org/10.6084/m9.figshare.34021314) as a single archive, `WorkingRegime_data.zip`. Unzipping it at the repository root restores `data/` and replaces the calculation steps above. With the data in place, draw the figures with:
 ```bash
 bash make_plots
 ```
