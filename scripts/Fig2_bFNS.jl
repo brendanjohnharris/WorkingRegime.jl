@@ -18,8 +18,12 @@ set_theme!(Fathom.fathom()) # LaTeXStrings render in STIX Two serif by Fathom de
 # inside small inset panels. Set on the theme rather than on each `axislegend` call. Fathom's
 # Legend block sets framevisible, padding, patchcolor and titlefont but no sizes, so both label and
 # title otherwise inherit the global font size.
-update_theme!(Legend = (; labelsize = Fathom.fathomfontsize() - 1,
-                        titlesize = Fathom.fathomfontsize() - 1))
+update_theme!(
+    Legend = (;
+        labelsize = Fathom.fathomfontsize() - 1,
+        titlesize = Fathom.fathomfontsize() - 1,
+    )
+)
 
 begin # * Options
     inset_log = false  # true: log-log as inset over linear plot; false: log-log as full axis
@@ -76,7 +80,7 @@ begin # * Set up figure
     lab_time = blocklabel(g_main[2, 0], "Time-fractional")
     box_space, box_time = if order_rows
         groupbox(g_main[1, 1:2], baikal),                              # space
-        groupbox(g_main[2, 1:2], bermejo; fillalpha = 0.03, bottom = -66) # time
+            groupbox(g_main[2, 1:2], bermejo; fillalpha = 0.03, bottom = -66) # time
     else
         groupbox(g_main[1:2, 1], baikal), groupbox(g_main[1:2, 2], bermejo; fillalpha = 0.03)
     end
@@ -202,7 +206,7 @@ begin # * Panel 4 — Unconfined power spectra: β = 1.0 vs β = 0.5
     plotspectrum!(ax, s_hi; color = :cornflowerblue)
     plotspectrum!(ax, s_lo; color = :crimson)
     ax.limits = ((1.0e-1, 1.0e0), (nothing, nothing))
-    axislegend( # explicit lines: the `plotspectrum!` recipe's own entry is a marker + line
+    axislegend(
         ax, [LineElement(color = :cornflowerblue), LineElement(color = :crimson)],
         [rich(mit("β"), " = $(β_hi)"), rich(mit("β"), " = $(β_lo)")]; position = :lb
     )
@@ -247,7 +251,7 @@ begin # * Panel e --- mean absolute deviation
         titlegap = 23,
         limits = ((1.0e-4, 1.0), (0.02, 3)),
         yticks = LogTicks(-2:0) # integer decades: the default lands on half-decades, whose labels
-                                # are wider and eat the width this narrow panel has least of
+        # are wider and eat the width this narrow panel has least of
     )
     lines!(ax, τs, mads; label = "Unconfined")
     lines!(ax, τs, gmads; color = cucumber, label = "Unimodal")
