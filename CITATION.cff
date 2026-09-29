@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "WorkingRegime.jl"
+abstract: "WorkingRegime.jl reproduces the analyses and figures of the working-regime study. It measures three scaling exponents of cortical dynamics (the diffusion, spectral and variability exponents) in neural recordings from mouse visual cortex, and computes the same exponents for a spiking circuit model and a fractional neural sampling theory."
+authors:
+  - family-names: Harris
+    given-names: Brendan
+    orcid: "https://orcid.org/0000-0003-3412-4186"
+    affiliation: "School of Physics, The University of Sydney"
+  - family-names: Gong
+    given-names: Pulin
+    orcid: "https://orcid.org/0000-0002-1960-3245"
+    affiliation: "School of Physics, The University of Sydney"
+repository-code: "https://github.com/brendanjohnharris/WorkingRegime.jl"
+license: MIT
+version: 0.1.0
+date-released: "2026-09-29"
+keywords:
+  - neuroscience
+  - cortical dynamics
+  - fractional dynamics
+  - spiking networks
+  - Julia
