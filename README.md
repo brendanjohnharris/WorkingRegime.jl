@@ -1,4 +1,5 @@
 # WorkingRegime.jl
+[![Zenodo](https://img.shields.io/badge/Zenodo-1682D4?logo=zenodo&logoColor=fff&style=for-the-badge)](https://doi.org/10.5281/zenodo.23033328)
 [![Figshare](https://img.shields.io/badge/figshare-556472?logo=figshare&logoColor=fff&style=for-the-badge)](https://doi.org/10.6084/m9.figshare.34021314)
 
 WorkingRegime.jl reproduces the analyses and figures of "_An adaptive fractional state links circuit mechanisms to cortical dynamics across the visual hierarchy_". We measure three scaling exponents of cortical dynamics in neural recordings, a spiking circuit model, and a fractional neural sampling theory:
